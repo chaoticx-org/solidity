@@ -44,18 +44,24 @@ class TestFunctionCall
 public:
 	enum class RenderMode
 	{
-		ExpectedValuesExpectedGas,
-		ActualValuesExpectedGas,
-		ExpectedValuesActualGas
+		ExpectedValues,
+		ActualValues
+	};
+	enum class GasRenderMode
+	{
+		ExpectedGas,
+		ActualGas
 	};
 
 	TestFunctionCall(FunctionCall _call): m_call(std::move(_call)), m_gasCosts(m_call.expectations.gasUsed) {}
 
 	/// Formats this function call test and applies the format that was detected during parsing.
 	/// _renderMode determines the source of values to be inserted into the updated test expectations.
-	///     RenderMode::ActualValuesExpectedGas: use the values produced by the test but for gas preserve the original expectations,
-	///     RenderMode::ExpectedValuesExpectedGas: preserve the original expectations for both gas and other values,
-	///     RenderMode::ExpectedValuesActualGas: use the original expectations but for gas use actual values,
+	///     RenderMode::ActualValues: use the values produced by the test,
+	///     RenderMode::ExpectedValues: preserve the original expectations values,
+	/// _gasRenderMode determines the source of gas to be inserted into the updated test expectations.
+	///     GasRenderMode::ActualGas: use the actual gas values produced by the test,
+	///     GasRenderMode::ExpectedGas: preserve the original gas expectations,
 	/// If _highlight is false, it's formatted without colorized highlighting. If it's true, AnsiColorized is
 	/// used to apply a colorized highlighting.
 	/// If _interactivePrint is true, we are producing output that will be interactively shown to the user
@@ -66,7 +72,8 @@ public:
 	std::string format(
 		ErrorReporter& _errorReporter,
 		std::string const& _linePrefix = "",
-		RenderMode _renderMode = RenderMode::ExpectedValuesExpectedGas,
+		RenderMode _renderMode = RenderMode::ExpectedValues,
+		GasRenderMode _gasRenderMode = GasRenderMode::ExpectedGas,
 		bool const _highlight = false,
 		bool const _interactivePrint = false
 	) const;
@@ -75,12 +82,13 @@ public:
 	/// of this function.
 	std::string format(
 		std::string const& _linePrefix = "",
-		RenderMode const _renderMode = RenderMode::ExpectedValuesExpectedGas,
+		RenderMode const _renderMode = RenderMode::ExpectedValues,
+		GasRenderMode const _gasRenderMode = GasRenderMode::ExpectedGas,
 		bool const _highlight = false
 	) const
 	{
 		ErrorReporter reporter;
-		return format(reporter, _linePrefix, _renderMode, _highlight);
+		return format(reporter, _linePrefix, _renderMode, _gasRenderMode, _highlight, false);
 	}
 
 	/// Resets current results in case the function was called and the result
@@ -93,6 +101,7 @@ public:
 	void setRawBytes(const bytes _rawBytes) { m_rawBytes = _rawBytes; }
 	void setGasCost(std::string const& _runType, u256 const& _gasCost) { m_gasCosts[_runType] = _gasCost; }
 	void setContractABI(Json::Value _contractABI) { m_contractABI = std::move(_contractABI); }
+	void setActualSideEffects(std::vector<std::string> _sideEffects) { m_call.actualSideEffects = _sideEffects; }
 
 private:
 	/// Tries to format the given `bytes`, applying the detected ABI types that have be set for each parameter.

@@ -36,9 +36,9 @@ string TestFunctionCall::format(
 	ErrorReporter& _errorReporter,
 	string const& _linePrefix,
 	RenderMode _renderMode,
+	GasRenderMode _gasRenderMode,
 	bool const _highlight,
-	bool const _interactivePrint
-) const
+	bool const _interactivePrint) const
 {
 	stringstream stream;
 
@@ -96,7 +96,7 @@ string TestFunctionCall::format(
 
 			if (m_call.omitsArrow)
 			{
-				if (_renderMode == RenderMode::ActualValuesExpectedGas && (m_failure || !matchesExpectation()))
+				if (_renderMode == RenderMode::ActualValues && _gasRenderMode == GasRenderMode::ExpectedGas && (m_failure || !matchesExpectation()))
 					stream << ws << arrow;
 			}
 			else
@@ -115,7 +115,7 @@ string TestFunctionCall::format(
 
 		/// Format either the expected output or the actual result output
 		string result;
-		if (_renderMode != RenderMode::ActualValuesExpectedGas)
+		if (_renderMode != RenderMode::ActualValues)
 		{
 			bool const isFailure = m_call.expectations.failure;
 			result = isFailure ?
@@ -132,7 +132,7 @@ string TestFunctionCall::format(
 			bytes output = m_rawBytes;
 			bool const isFailure = m_failure;
 			result = isFailure ?
-				formatFailure(_errorReporter, m_call, output, _renderMode == RenderMode::ActualValuesExpectedGas, highlight) :
+				formatFailure(_errorReporter, m_call, output, _gasRenderMode == GasRenderMode::ExpectedGas, highlight) :
 				matchesExpectation() ?
 					formatRawParameters(m_call.expectations.result) :
 					formatBytesParameters(
@@ -196,7 +196,24 @@ string TestFunctionCall::format(
 			}
 		}
 
-		stream << formatGasExpectations(_linePrefix, _renderMode == RenderMode::ExpectedValuesActualGas, _interactivePrint);
+		stream << formatGasExpectations(_linePrefix, _renderMode == RenderMode::ExpectedValues && _gasRenderMode == GasRenderMode::ActualGas, _interactivePrint);
+
+		vector<string> sideEffects;
+		if (_renderMode == RenderMode::ExpectedValues)
+			sideEffects = m_call.expectedSideEffects;
+		else
+			sideEffects = m_call.actualSideEffects;
+
+		if (!sideEffects.empty())
+		{
+			stream << std::endl;
+			for (string const& effect: sideEffects)
+			{
+				stream << _linePrefix << "// ~ " << effect;
+				if (effect != *sideEffects.rbegin())
+					stream << std::endl;
+			}
+		}
 	};
 
 	formatOutput(m_call.displayMode == FunctionCall::DisplayMode::SingleLine);
