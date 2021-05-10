@@ -16,6 +16,7 @@
 */
 // SPDX-License-Identifier: GPL-3.0
 #include <libsolidity/ast/AST.h>
+#include <libsolidity/ast/ASTUtils.h>
 #include <libsolidity/ast/ASTVisitor.h>
 #include <libsolidity/interface/ReadFile.h>
 #include <libsolidity/lsp/LanguageServer.h>
@@ -41,7 +42,8 @@ using namespace std::placeholders;
 using namespace solidity::langutil;
 using namespace solidity::frontend;
 
-namespace solidity::lsp {
+namespace solidity::lsp
+{
 
 namespace // {{{ helpers
 {
@@ -50,33 +52,6 @@ string toFileURI(boost::filesystem::path const& _path)
 {
 	return "file://" + _path.generic_string();
 }
-
-class ASTNodeLocator: public ASTConstVisitor
-{
-public:
-	static ASTNode const* locate(int _pos, SourceUnit const& _sourceUnit)
-	{
-		ASTNodeLocator locator{_pos};
-		_sourceUnit.accept(locator);
-		return locator.m_closestMatch;
-	}
-
-	bool visitNode(ASTNode const& _node) override
-	{
-		if (_node.location().contains(m_pos))
-		{
-			m_closestMatch = &_node;
-			return true;
-		}
-		return false;
-	}
-
-private:
-	explicit ASTNodeLocator(int _pos): m_pos{_pos}, m_closestMatch{nullptr} {}
-
-	int m_pos;
-	ASTNode const* m_closestMatch;
-};
 
 optional<string> extractPathFromFileURI(std::string const& _uri)
 {
@@ -126,7 +101,25 @@ std::pair<size_t, size_t> offsetsOf(std::string const& _text, LineColumnRange _r
 	auto const end = CharStream::translateLineColumnToPosition(_text, _range.end.line, _range.end.column);
 	solAssert(start.has_value(), "");
 	solAssert(end.has_value(), "");
-	return std::pair{ size_t(start.value()), size_t(end.value()) };
+	return std::pair{size_t(start.value()), size_t(end.value())};
+}
+
+constexpr int toDiagnosticSeverity(Error::Type _errorType)
+{
+	// 1=Error, 2=Warning, 3=Info, 4=Hint
+	switch (_errorType)
+	{
+		case Error::Type::CodeGenerationError:
+		case Error::Type::DeclarationError:
+		case Error::Type::DocstringParsingError:
+		case Error::Type::ParserError:
+		case Error::Type::SyntaxError:
+		case Error::Type::TypeError:
+			return 1;
+		case Error::Type::Warning:
+			return 2;
+	}
+	return 1;
 }
 
 } // }}} end helpers
@@ -136,18 +129,18 @@ LanguageServer::LanguageServer(Logger _logger, unique_ptr<Transport> _transport)
 	m_handlers{
 		{"$/cancelRequest", {} }, // Don't do anything for now, as we're synchronous.
 		{"cancelRequest", {} }, // Don't do anything for now, as we're synchronous.
-		{"initialize", bind(&LanguageServer::handle_initialize, this, _1, _2)},
+		{"initialize", bind(&LanguageServer::handleInitialize, this, _1, _2)},
 		{"initialized", {} },
 		{"shutdown", [this](auto, auto) { m_shutdownRequested = true; }},
-		{"textDocument/definition", [this](auto _id, auto _args) { handleGotoDefAndImpl(_id, _args); }},
-		{"textDocument/didChange", bind(&LanguageServer::handle_textDocument_didChange, this, _1, _2)},
+		{"textDocument/definition", [this](auto _id, auto _args) { handleGotoDefinition(_id, _args); }},
+		{"textDocument/didChange", bind(&LanguageServer::handleTextDocumentDidChange, this, _1, _2)},
 		{"textDocument/didClose", [](auto, auto) {/*nothing for now*/}},
-		{"textDocument/didOpen", bind(&LanguageServer::handle_textDocument_didOpen, this, _1, _2)},
-		{"textDocument/documentHighlight", bind(&LanguageServer::handle_textDocument_highlight, this, _1, _2)},
-		{"textDocument/hover", bind(&LanguageServer::handle_textDocument_hover, this, _1, _2)},
-		{"textDocument/implementation", [this](auto _id, auto _args) { handleGotoDefAndImpl(_id, _args); }},
-		{"textDocument/references", bind(&LanguageServer::handle_textDocument_references, this, _1, _2)},
-		{"workspace/didChangeConfiguration", bind(&LanguageServer::handle_workspace_didChangeConfiguration, this, _1, _2)},
+		{"textDocument/didOpen", bind(&LanguageServer::handleTextDocumentDidOpen, this, _1, _2)},
+		{"textDocument/documentHighlight", bind(&LanguageServer::handleTextDocumentHighlight, this, _1, _2)},
+		{"textDocument/hover", bind(&LanguageServer::handleTextDocumentHover, this, _1, _2)},
+		{"textDocument/implementation", [this](auto _id, auto _args) { handleGotoDefinition(_id, _args); }},
+		{"textDocument/references", bind(&LanguageServer::handleTextDocumentReferences, this, _1, _2)},
+		{"workspace/didChangeConfiguration", bind(&LanguageServer::handleWorkspaceDidChangeConfiguration, this, _1, _2)},
 	},
 	m_logger{move(_logger)}
 {
@@ -252,25 +245,6 @@ void LanguageServer::documentContentUpdated(string const& _path, string const& _
 	compileSource(_path);
 }
 
-constexpr DiagnosticSeverity toDiagnosticSeverity(Error::Type _errorType)
-{
-	using Type = Error::Type;
-	using Severity = DiagnosticSeverity;
-	switch (_errorType)
-	{
-		case Type::CodeGenerationError:
-		case Type::DeclarationError:
-		case Type::DocstringParsingError:
-		case Type::ParserError:
-		case Type::SyntaxError:
-		case Type::TypeError:
-			return Severity::Error;
-		case Type::Warning:
-			return Severity::Warning;
-	}
-	return Severity::Error; // Should never be reached.
-}
-
 bool LanguageServer::compile(std::string const& _path)
 {
 	// TODO: optimize! do not recompile if nothing has changed (file(s) not flagged dirty).
@@ -312,7 +286,7 @@ void LanguageServer::compileSource(std::string const& _path)
 
 		Json::Value jsonDiag;
 		jsonDiag["source"] = "solc";
-		jsonDiag["severity"] = int(toDiagnosticSeverity(error->type()));
+		jsonDiag["severity"] = toDiagnosticSeverity(error->type());
 		jsonDiag["message"] = message.primary.message;
 		jsonDiag["range"] = toJsonRange(
 			message.primary.position.line, message.primary.startColumn,
@@ -339,17 +313,24 @@ void LanguageServer::compileSource(std::string const& _path)
 	m_client->notify("textDocument/publishDiagnostics", params);
 }
 
-frontend::ASTNode const* LanguageServer::findASTNode(LineColumn _position, std::string const& _fileName)
+frontend::ASTNode const* LanguageServer::requestASTNode(DocumentPosition _filePos)
 {
+	if (!m_compilerStack)
+		compile(_filePos.path);
+
+	auto file = m_fileReader->sourceCodes().find(_filePos.path);
+	if (file == m_fileReader->sourceCodes().end())
+		return nullptr;
+
 	if (!m_compilerStack || m_compilerStack->state() < frontend::CompilerStack::AnalysisPerformed)
 		return nullptr;
 
-	frontend::SourceUnit const& sourceUnit = m_compilerStack->ast(_fileName);
-	auto const sourcePos = sourceUnit.location().source->translateLineColumnToPosition(_position.line, _position.column);
+	frontend::SourceUnit const& sourceUnit = m_compilerStack->ast(_filePos.path);
+	auto const sourcePos = sourceUnit.location().source->translateLineColumnToPosition(_filePos.position.line, _filePos.position.column);
 	if (!sourcePos.has_value())
 		return nullptr;
 
-	return ASTNodeLocator::locate(sourcePos.value(), sourceUnit);
+	return locateASTNode(sourcePos.value(), sourceUnit);
 }
 
 optional<SourceLocation> LanguageServer::declarationPosition(frontend::Declaration const* _declaration)
@@ -391,140 +372,90 @@ void LanguageServer::findAllReferences(
 
 vector<SourceLocation> LanguageServer::references(DocumentPosition _documentPosition)
 {
-	auto const file = m_fileReader->sourceCodes().find(_documentPosition.path);
-	if (file == m_fileReader->sourceCodes().end())
-		return {};
-
-	if (!m_compilerStack)
-		compile(_documentPosition.path);
-
-	solAssert(m_compilerStack.get() != nullptr, "");
-
-	string const& sourceName = _documentPosition.path;
-	ASTNode const* sourceNode = findASTNode(_documentPosition.position, sourceName);
+	ASTNode const* sourceNode = requestASTNode(_documentPosition);
 	if (!sourceNode)
 		return {};
 
-	frontend::SourceUnit const& sourceUnit = m_compilerStack->ast(sourceName);
+	frontend::SourceUnit const& sourceUnit = m_compilerStack->ast(_documentPosition.path);
 	vector<SourceLocation> output;
-	matchASTNode(
-		sourceNode,
-		[&](Identifier const* sourceIdentifier)
-		{
-			if (auto decl = sourceIdentifier->annotation().referencedDeclaration)
-				output += findAllReferences(decl, decl->name(), sourceUnit);
-			for (auto const decl: sourceIdentifier->annotation().candidateDeclarations)
-				output += findAllReferences(decl, decl->name(), sourceUnit);
-		},
-		[&](VariableDeclaration const* decl)
-		{
+	if (auto const* identifier = dynamic_cast<Identifier const*>(sourceNode))
+	{
+		if (auto decl = identifier->annotation().referencedDeclaration)
 			output += findAllReferences(decl, decl->name(), sourceUnit);
-		},
-		[&](FunctionDefinition const* functionDefinition)
-		{
-			output += findAllReferences(functionDefinition, functionDefinition->name(), sourceUnit);
-		},
-		[&](EnumDefinition const* enumDef)
-		{
-			output += findAllReferences(enumDef, enumDef->name(), sourceUnit);
-		},
-		[&](MemberAccess const* memberAccess)
-		{
-			if (Declaration const* decl = memberAccess->annotation().referencedDeclaration)
-				output += findAllReferences(decl, memberAccess->memberName(), sourceUnit);
-		},
-		[&](ImportDirective const* importDirective)
-		{
-			output += findAllReferences(importDirective, importDirective->name(), sourceUnit);
-		}
-	);
+		for (auto const decl: identifier->annotation().candidateDeclarations)
+			output += findAllReferences(decl, decl->name(), sourceUnit);
+	}
+	else if (auto const* declaration = dynamic_cast<Declaration const*>(sourceNode))
+	{
+		output += findAllReferences(declaration, declaration->name(), sourceUnit);
+	}
+	else if (auto const* memberAccess = dynamic_cast<MemberAccess const*>(sourceNode))
+	{
+		if (Declaration const* decl = memberAccess->annotation().referencedDeclaration)
+			output += findAllReferences(decl, memberAccess->memberName(), sourceUnit);
+	}
 	return output;
 }
 
 vector<DocumentHighlight> LanguageServer::semanticHighlight(DocumentPosition _documentPosition)
 {
-	if (!m_compilerStack || m_compilerStack->state() < frontend::CompilerStack::AnalysisPerformed)
-		return {};
-
-	frontend::SourceUnit const& sourceUnit = m_compilerStack->ast(_documentPosition.path);
-	ASTNode const* sourceNode = findASTNode(_documentPosition.position, _documentPosition.path);
+	ASTNode const* sourceNode = requestASTNode(_documentPosition);
 	if (!sourceNode)
 		return {};
 
+	frontend::SourceUnit const& sourceUnit = m_compilerStack->ast(_documentPosition.path);
+
 	vector<DocumentHighlight> output;
-	matchASTNode(
-		sourceNode,
-		[&](Identifier const* sourceIdentifier)
-		{
-			if (sourceIdentifier->annotation().referencedDeclaration)
-				output += ReferenceCollector::collect(sourceIdentifier->annotation().referencedDeclaration, sourceUnit, sourceIdentifier->name());
+	if (auto const* declaration = dynamic_cast<Declaration const*>(sourceNode))
+	{
+		output += ReferenceCollector::collect(declaration, sourceUnit, declaration->name());
+	}
+	else if (auto const* identifier = dynamic_cast<Identifier const*>(sourceNode))
+	{
+		if (identifier->annotation().referencedDeclaration)
+			output += ReferenceCollector::collect(identifier->annotation().referencedDeclaration, sourceUnit, identifier->name());
 
-			for (Declaration const* declaration: sourceIdentifier->annotation().candidateDeclarations)
-				output += ReferenceCollector::collect(declaration, sourceUnit, sourceIdentifier->name());
+		for (Declaration const* declaration: identifier->annotation().candidateDeclarations)
+			output += ReferenceCollector::collect(declaration, sourceUnit, identifier->name());
 
-			for (Declaration const* declaration: sourceIdentifier->annotation().overloadedDeclarations)
-				output += ReferenceCollector::collect(declaration, sourceUnit, sourceIdentifier->name());
-		},
-		[&](VariableDeclaration const* varDecl)
+		for (Declaration const* declaration: identifier->annotation().overloadedDeclarations)
+			output += ReferenceCollector::collect(declaration, sourceUnit, identifier->name());
+	}
+	else if (auto const* identifierPath = dynamic_cast<IdentifierPath const*>(sourceNode))
+	{
+		solAssert(!identifierPath->path().empty(), "");
+		output += ReferenceCollector::collect(identifierPath->annotation().referencedDeclaration, sourceUnit, identifierPath->path().back());
+	}
+	else if (auto const* memberAccess = dynamic_cast<MemberAccess const*>(sourceNode))
+	{
+		Type const* type = memberAccess->expression().annotation().type;
+		if (auto const ttype = dynamic_cast<TypeType const*>(type))
 		{
-			output += ReferenceCollector::collect(varDecl, sourceUnit, varDecl->name());
-		},
-		[&](StructDefinition const* structDef)
-		{
-			output += ReferenceCollector::collect(structDef, sourceUnit, structDef->name());
-		},
-		[&](ContractDefinition const* contractDef)
-		{
-			output += ReferenceCollector::collect(contractDef, sourceUnit, contractDef->name());
-		},
-		[&](MemberAccess const* memberAccess)
-		{
-			Type const* type = memberAccess->expression().annotation().type;
-			if (auto const ttype = dynamic_cast<TypeType const*>(type))
+			auto const memberName = memberAccess->memberName();
+
+			if (auto const* enumType = dynamic_cast<EnumType const*>(ttype->actualType()))
 			{
-				auto const memberName = memberAccess->memberName();
+				// find the definition
+				vector<DocumentHighlight> output;
+				for (auto const& enumMember: enumType->enumDefinition().members())
+					if (enumMember->name() == memberName)
+						output += ReferenceCollector::collect(enumMember.get(), sourceUnit, enumMember->name());
 
-				if (auto const* enumType = dynamic_cast<EnumType const*>(ttype->actualType()))
-				{
-					// find the definition
-					vector<DocumentHighlight> output;
-					for (auto const& enumMember: enumType->enumDefinition().members())
-						if (enumMember->name() == memberName)
-							output += ReferenceCollector::collect(enumMember.get(), sourceUnit, enumMember->name());
-
-					// TODO: find uses of the enum value
-				}
+				// TODO: find uses of the enum value
 			}
-			else if (auto const structType = dynamic_cast<StructType const*>(type))
-			{
-				// TODO: highlight all struct member occurrences.
-				// memberAccess->memberName()
-				// structType->
-			}
-			else
-			{
-				// TODO: EnumType, ...
-				trace("semanticHighlight: member type is: "s + (type ? typeid(*type).name() : "NULL"));
-			}
-		},
-		[&](IdentifierPath const* identifierPath)
-		{
-			solAssert(!identifierPath->path().empty(), "");
-			output += ReferenceCollector::collect(identifierPath->annotation().referencedDeclaration, sourceUnit, identifierPath->path().back());
-		},
-		[&](FunctionDefinition const* functionDefinition)
-		{
-			output += ReferenceCollector::collect(functionDefinition, sourceUnit, functionDefinition->name());
-		},
-		[&](EnumDefinition const* enumDef)
-		{
-			output += ReferenceCollector::collect(enumDef, sourceUnit, enumDef->name());
-		},
-		[&](ImportDirective const* importDirective)
-		{
-			output += ReferenceCollector::collect(importDirective, sourceUnit, importDirective->name());
 		}
-	);
+		else if (auto const structType = dynamic_cast<StructType const*>(type))
+		{
+			// TODO: highlight all struct member occurrences.
+			// memberAccess->memberName()
+			// structType->
+		}
+		else
+		{
+			// TODO: EnumType, ...
+			trace("semanticHighlight: member type is: "s + (type ? typeid(*type).name() : "NULL"));
+		}
+	}
 	return output;
 }
 
@@ -553,7 +484,7 @@ bool LanguageServer::run()
 	return m_shutdownRequested;
 }
 
-void LanguageServer::handle_initialize(MessageID _id, Json::Value const& _args)
+void LanguageServer::handleInitialize(MessageID _id, Json::Value const& _args)
 {
 	string rootPath;
 	if (Json::Value uri = _args["rootUri"])
@@ -591,13 +522,13 @@ void LanguageServer::handle_initialize(MessageID _id, Json::Value const& _args)
 	m_client->reply(_id, replyArgs);
 }
 
-void LanguageServer::handle_workspace_didChangeConfiguration(MessageID, Json::Value const& _args)
+void LanguageServer::handleWorkspaceDidChangeConfiguration(MessageID, Json::Value const& _args)
 {
 	if (_args["settings"].isObject())
 		changeConfiguration(_args["settings"]);
 }
 
-void LanguageServer::handle_exit(MessageID _id, Json::Value const& /*_args*/)
+void LanguageServer::handleExit(MessageID _id, Json::Value const& /*_args*/)
 {
 	m_exitRequested = true;
 	Json::Value replyArgs = Json::intValue;
@@ -605,7 +536,7 @@ void LanguageServer::handle_exit(MessageID _id, Json::Value const& /*_args*/)
 	m_client->reply(_id, replyArgs);
 }
 
-void LanguageServer::handle_textDocument_didOpen(MessageID /*_id*/, Json::Value const& _args)
+void LanguageServer::handleTextDocumentDidOpen(MessageID /*_id*/, Json::Value const& _args)
 {
 	if (!_args["textDocument"])
 		return;
@@ -619,7 +550,7 @@ void LanguageServer::handle_textDocument_didOpen(MessageID /*_id*/, Json::Value 
 	compileSource(path);
 }
 
-void LanguageServer::handle_textDocument_didChange(MessageID /*_id*/, Json::Value const& _args)
+void LanguageServer::handleTextDocumentDidChange(MessageID /*_id*/, Json::Value const& _args)
 {
 	auto const path = extractPathFromFileURI(_args["textDocument"]["uri"].asString()).value();
 	auto const contentChanges = _args["contentChanges"];
@@ -649,20 +580,9 @@ void LanguageServer::handle_textDocument_didChange(MessageID /*_id*/, Json::Valu
 		compileSource(path);
 }
 
-void LanguageServer::handleGotoDefAndImpl(MessageID _id, Json::Value const& _args)
+void LanguageServer::handleGotoDefinition(MessageID _id, Json::Value const& _args)
 {
-	DocumentPosition const dpos = extractDocumentPosition(_args);
-
-	solAssert(m_compilerStack.get() != nullptr, "source should be compiled already");
-
-	if (!m_fileReader->sourceCodes().count(dpos.path))
-	{
-		Json::Value emptyResponse = Json::arrayValue;
-		m_client->reply(_id, emptyResponse);
-		return;
-	}
-
-	ASTNode const* sourceNode = findASTNode(dpos.position, dpos.path);
+	ASTNode const* sourceNode = requestASTNode(extractDocumentPosition(_args));
 	if (!sourceNode)
 	{
 		Json::Value emptyResponse = Json::arrayValue;
@@ -671,32 +591,29 @@ void LanguageServer::handleGotoDefAndImpl(MessageID _id, Json::Value const& _arg
 	}
 
 	vector<SourceLocation> locations;
-	matchASTNode(
-		sourceNode,
-		[&](ImportDirective const* importDirective)
-		{
-			auto const& path = *importDirective->annotation().absolutePath;
-			auto const i = m_fileReader->sourceCodes().find(path);
-			if (i != m_fileReader->sourceCodes().end())
-				locations.emplace_back(SourceLocation{0, 0, make_shared<CharStream>("", path)});
-		},
-		[&](MemberAccess const* memberAccess) // For scope members, jump to the naming symbol of the referencing declaration of this member.
-		{
-			auto const declaration = memberAccess->annotation().referencedDeclaration;
-			auto const location = declarationPosition(declaration);
-			if (location.has_value())
-				locations.emplace_back(location.value());
-		},
-		[&](Identifier const* sourceIdentifier) // For identifiers, jump to the naming symbol of the definition of this identifier.
-		{
-			if (Declaration const* decl = sourceIdentifier->annotation().referencedDeclaration)
-				if (auto location = declarationPosition(decl); location.has_value())
-					locations.emplace_back(move(location.value()));
-			for (auto const declaration: sourceIdentifier->annotation().candidateDeclarations)
-				if (auto location = declarationPosition(declaration); location.has_value())
-					locations.emplace_back(move(location.value()));
-		}
-	);
+	if (auto const* importDirective = dynamic_cast<ImportDirective const*>(sourceNode))
+	{
+		auto const& path = *importDirective->annotation().absolutePath;
+		auto const i = m_fileReader->sourceCodes().find(path);
+		if (i != m_fileReader->sourceCodes().end())
+			locations.emplace_back(SourceLocation{0, 0, make_shared<CharStream>("", path)});
+	}
+	else if (auto const* identifier = dynamic_cast<Identifier const*>(sourceNode))
+	{
+		if (Declaration const* decl = identifier->annotation().referencedDeclaration)
+			if (auto location = declarationPosition(decl); location.has_value())
+				locations.emplace_back(move(location.value()));
+		for (auto const declaration: identifier->annotation().candidateDeclarations)
+			if (auto location = declarationPosition(declaration); location.has_value())
+				locations.emplace_back(move(location.value()));
+	}
+	else if (auto const* memberAccess = dynamic_cast<MemberAccess const*>(sourceNode))
+	{
+		auto const declaration = memberAccess->annotation().referencedDeclaration;
+		auto const location = declarationPosition(declaration);
+		if (location.has_value())
+			locations.emplace_back(location.value());
+	}
 
 	Json::Value reply = Json::arrayValue;
 	for (SourceLocation const& location: locations)
@@ -711,37 +628,30 @@ string LanguageServer::symbolHoverInformation(frontend::ASTNode const* _sourceNo
 		if (documented->documentation())
 			return *documented->documentation()->text();
 	}
+	else if (auto const* identifier = dynamic_cast<Identifier const*>(_sourceNode))
+	{
+		if (Type const* type = identifier->annotation().type)
+			return type->toString(false);
+	}
+	else if (auto const* identifierPath = dynamic_cast<IdentifierPath const*>(_sourceNode))
+	{
+		Declaration const* decl = identifierPath->annotation().referencedDeclaration;
+		if (decl && decl->type())
+			return decl->type()->toString(false);
+	}
+	else if (auto const* memberAccess = dynamic_cast<MemberAccess const*>(_sourceNode))
+	{
+		if (memberAccess->annotation().type)
+			return memberAccess->annotation().type->toString(false);
+	}
 
-	string tooltipText{};
-	matchASTNode(
-		_sourceNode,
-		[&](Identifier const* identifier)
-		{
-			Type const* ty = identifier->annotation().type;
-			tooltipText += ty->toString(false);
-		},
-		[&](MemberAccess const* memberAccess)
-		{
-			if (memberAccess->annotation().type)
-				tooltipText += memberAccess->annotation().type->toString(false);
-		},
-		[&](IdentifierPath const* identifierPath)
-		{
-			Declaration const* decl = identifierPath->annotation().referencedDeclaration;
-			if (decl && decl->type())
-				tooltipText += decl->type()->toString(false);
-		}
-	);
-
-	return tooltipText;
+	return {};
 }
 
 
-void LanguageServer::handle_textDocument_hover(MessageID _id, Json::Value const& _args)
+void LanguageServer::handleTextDocumentHover(MessageID _id, Json::Value const& _args)
 {
-	auto const dpos = extractDocumentPosition(_args);
-
-	auto const sourceNode = findASTNode(dpos.position, dpos.path);
+	auto const sourceNode = requestASTNode(extractDocumentPosition(_args));
 	if (!sourceNode)
 	{
 		Json::Value emptyResponse = Json::arrayValue;
@@ -761,7 +671,7 @@ void LanguageServer::handle_textDocument_hover(MessageID _id, Json::Value const&
 	m_client->reply(_id, reply);
 }
 
-void LanguageServer::handle_textDocument_highlight(MessageID _id, Json::Value const& _args)
+void LanguageServer::handleTextDocumentHighlight(MessageID _id, Json::Value const& _args)
 {
 	auto const dpos = extractDocumentPosition(_args);
 
@@ -774,83 +684,58 @@ void LanguageServer::handle_textDocument_highlight(MessageID _id, Json::Value co
 		Json::Value item = Json::objectValue;
 		item["range"] = toJsonRange(highlight.location);
 		if (highlight.kind != DocumentHighlightKind::Unspecified)
-			item["kind"] = static_cast<int>(highlight.kind);
+			item["kind"] = int(highlight.kind);
 
 		jsonReply.append(item);
 	}
 	m_client->reply(_id, jsonReply);
 }
 
-void LanguageServer::handle_textDocument_references(MessageID _id, Json::Value const& _args)
+void LanguageServer::handleTextDocumentReferences(MessageID _id, Json::Value const& _args)
 {
 	auto const dpos = extractDocumentPosition(_args);
 
-	auto file = m_fileReader->sourceCodes().find(dpos.path);
-	if (file == m_fileReader->sourceCodes().end())
-	{
-		Json::Value emptyResponse = Json::arrayValue;
-		m_client->reply(_id, emptyResponse); // reply with "No references".
-		return;
-	}
-
-	if (!m_compilerStack)
-		compile(dpos.path);
-
-	solAssert(m_compilerStack.get() != nullptr, "");
-
-	auto const sourceNode = findASTNode(dpos.position, dpos.path);
+	auto const sourceNode = requestASTNode(dpos);
 	if (!sourceNode)
 	{
 		Json::Value emptyResponse = Json::arrayValue;
 		m_client->reply(_id, emptyResponse); // reply with "No references".
 		return;
 	}
+	frontend::SourceUnit const& sourceUnit = m_compilerStack->ast(dpos.path);
 
-	auto locations = vector<SourceLocation>{};
-	matchASTNode(
-		sourceNode,
-		[&](Identifier const* sourceIdentifier)
-		{
-			frontend::SourceUnit const& sourceUnit = m_compilerStack->ast(dpos.path);
+	auto output = vector<SourceLocation>{};
+	if (auto const* declaration = dynamic_cast<Declaration const*>(sourceNode))
+	{
+		output += findAllReferences(declaration, declaration->name(), sourceUnit);
+	}
+	else if (auto const* identifier = dynamic_cast<Identifier const*>(sourceNode))
+	{
+		if (auto decl = identifier->annotation().referencedDeclaration)
+			output += findAllReferences(decl, decl->name(), sourceUnit);
 
-			if (auto decl = sourceIdentifier->annotation().referencedDeclaration)
-				findAllReferences(decl, decl->name(), sourceUnit, locations);
+		for (auto const decl: identifier->annotation().candidateDeclarations)
+			output += findAllReferences(decl, decl->name(), sourceUnit);
 
-			for (auto const decl: sourceIdentifier->annotation().candidateDeclarations)
-				findAllReferences(decl, decl->name(), sourceUnit, locations);
-
-			for (auto const decl: sourceIdentifier->annotation().overloadedDeclarations)
-				findAllReferences(decl, decl->name(), sourceUnit, locations);
-		},
-		[&](VariableDeclaration const* decl)
+		for (auto const decl: identifier->annotation().overloadedDeclarations)
+			output += findAllReferences(decl, decl->name(), sourceUnit);
+	}
+	else if (auto const* identifierPath = dynamic_cast<IdentifierPath const*>(sourceNode))
+	{
+		if (auto decl = identifierPath->annotation().referencedDeclaration)
+			output += findAllReferences(decl, decl->name(), sourceUnit);
+	}
+	else if (auto const* memberAccess = dynamic_cast<MemberAccess const*>(sourceNode))
+	{
+		if (Declaration const* decl = memberAccess->annotation().referencedDeclaration)
 		{
-			frontend::SourceUnit const& sourceUnit = m_compilerStack->ast(dpos.path);
-			findAllReferences(decl, decl->name(), sourceUnit, locations);
-		},
-		[&](FunctionDefinition const* functionDefinition)
-		{
-			frontend::SourceUnit const& sourceUnit = m_compilerStack->ast(dpos.path);
-			findAllReferences(functionDefinition, functionDefinition->name(), sourceUnit, locations);
-		},
-		[&](EnumDefinition const* enumDef)
-		{
-			frontend::SourceUnit const& sourceUnit = m_compilerStack->ast(dpos.path);
-			findAllReferences(enumDef, enumDef->name(), sourceUnit, locations);
-		},
-		[&](MemberAccess const* memberAccess)
-		{
-			if (Declaration const* decl = memberAccess->annotation().referencedDeclaration)
-			{
-				frontend::SourceUnit const& sourceUnit = m_compilerStack->ast(dpos.path);
-				findAllReferences(decl, memberAccess->memberName(), sourceUnit, locations);
-			}
+			output += findAllReferences(decl, memberAccess->memberName(), sourceUnit);
 		}
-	);
+	}
 
 	Json::Value jsonReply = Json::arrayValue;
-	for (SourceLocation const& location: locations)
+	for (SourceLocation const& location: output)
 		jsonReply.append(toJson(m_basePath, location));
-
 	m_client->reply(_id, jsonReply);
 }
 
@@ -870,11 +755,11 @@ void LanguageServer::handleMessage(Json::Value const& _jsonMessage)
 {
 	string const methodName = _jsonMessage["method"].asString();
 
-	MessageID const id = _jsonMessage["id"].isInt()
-		? MessageID{to_string(_jsonMessage["id"].asInt())}
-		: _jsonMessage["id"].isString()
-			? MessageID{_jsonMessage["id"].asString()}
-			: MessageID{};
+	MessageID const id = _jsonMessage["id"].isInt() ?
+		MessageID{to_string(_jsonMessage["id"].asInt())} :
+		_jsonMessage["id"].isString() ?
+			MessageID{_jsonMessage["id"].asString()} :
+			MessageID{};
 
 	auto const handler = m_handlers.find(methodName);
 	if (handler == m_handlers.end())

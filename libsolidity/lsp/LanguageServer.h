@@ -48,11 +48,13 @@
 #include <variant>
 #include <vector>
 
-namespace solidity::frontend {
-	class Declaration;
+namespace solidity::frontend
+{
+class Declaration;
 }
 
-namespace solidity::lsp {
+namespace solidity::lsp
+{
 
 enum class ErrorCode;
 
@@ -89,15 +91,15 @@ public:
 	void handleMessage(Json::Value const& _jsonMessage);
 
 protected:
-	void handle_initialize(MessageID _id, Json::Value const& _args);
-	void handle_exit(MessageID _id, Json::Value const& _args);
-	void handle_workspace_didChangeConfiguration(MessageID _id, Json::Value const& _args);
-	void handle_textDocument_didOpen(MessageID _id, Json::Value const& _args);
-	void handle_textDocument_didChange(MessageID _id, Json::Value const& _args);
-	void handle_textDocument_hover(MessageID _id, Json::Value const& _args);
-	void handle_textDocument_highlight(MessageID _id, Json::Value const& _args);
-	void handle_textDocument_references(MessageID _id, Json::Value const& _args);
-	void handleGotoDefAndImpl(MessageID _id, Json::Value const& _args);
+	void handleInitialize(MessageID _id, Json::Value const& _args);
+	void handleExit(MessageID _id, Json::Value const& _args);
+	void handleWorkspaceDidChangeConfiguration(MessageID _id, Json::Value const& _args);
+	void handleTextDocumentDidOpen(MessageID _id, Json::Value const& _args);
+	void handleTextDocumentDidChange(MessageID _id, Json::Value const& _args);
+	void handleTextDocumentHover(MessageID _id, Json::Value const& _args);
+	void handleTextDocumentHighlight(MessageID _id, Json::Value const& _args);
+	void handleTextDocumentReferences(MessageID _id, Json::Value const& _args);
+	void handleGotoDefinition(MessageID _id, Json::Value const& _args);
 
 	/**
 	 * Constructs some tooltip (hover) text.
@@ -145,7 +147,7 @@ protected:
 
 	bool compile(std::string const& _path);
 
-	frontend::ASTNode const* findASTNode(langutil::LineColumn _position, std::string const& _fileName);
+	frontend::ASTNode const* requestASTNode(DocumentPosition _filePos);
 
 	std::optional<langutil::SourceLocation> declarationPosition(frontend::Declaration const* _declaration);
 

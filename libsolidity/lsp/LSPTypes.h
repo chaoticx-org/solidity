@@ -56,13 +56,6 @@ struct DocumentHighlight {
 	DocumentHighlightKind kind = DocumentHighlightKind::Unspecified;
 };
 
-enum class DiagnosticSeverity {
-	Error = 1,
-	Warning = 2,
-	Information = 3,
-	Hint = 4,
-};
-
 /// Represents a related message and source code location for a diagnostic. This should be
 /// used to point to code locations that cause or related to a diagnostics, e.g when duplicating
 /// a symbol in a scope.
