@@ -122,6 +122,14 @@ constexpr int toDiagnosticSeverity(Error::Type _errorType)
 	return 1;
 }
 
+vector<Declaration const*> allAnnotatedDeclarations(Identifier const* _identifier)
+{
+	vector<Declaration const*> output;
+	output.push_back(_identifier->annotation().referencedDeclaration);
+	output += _identifier->annotation().candidateDeclarations;
+	return output;
+}
+
 } // }}} end helpers
 
 LanguageServer::LanguageServer(Logger _logger, unique_ptr<Transport> _transport):
@@ -380,10 +388,8 @@ vector<SourceLocation> LanguageServer::references(DocumentPosition _documentPosi
 	vector<SourceLocation> output;
 	if (auto const* identifier = dynamic_cast<Identifier const*>(sourceNode))
 	{
-		if (auto decl = identifier->annotation().referencedDeclaration)
-			output += findAllReferences(decl, decl->name(), sourceUnit);
-		for (auto const decl: identifier->annotation().candidateDeclarations)
-			output += findAllReferences(decl, decl->name(), sourceUnit);
+		for (auto const* declaration: allAnnotatedDeclarations(identifier))
+			output += findAllReferences(declaration, declaration->name(), sourceUnit);
 	}
 	else if (auto const* declaration = dynamic_cast<Declaration const*>(sourceNode))
 	{
@@ -412,13 +418,7 @@ vector<DocumentHighlight> LanguageServer::semanticHighlight(DocumentPosition _do
 	}
 	else if (auto const* identifier = dynamic_cast<Identifier const*>(sourceNode))
 	{
-		if (identifier->annotation().referencedDeclaration)
-			output += ReferenceCollector::collect(identifier->annotation().referencedDeclaration, sourceUnit, identifier->name());
-
-		for (Declaration const* declaration: identifier->annotation().candidateDeclarations)
-			output += ReferenceCollector::collect(declaration, sourceUnit, identifier->name());
-
-		for (Declaration const* declaration: identifier->annotation().overloadedDeclarations)
+		for (auto const* declaration: allAnnotatedDeclarations(identifier))
 			output += ReferenceCollector::collect(declaration, sourceUnit, identifier->name());
 	}
 	else if (auto const* identifierPath = dynamic_cast<IdentifierPath const*>(sourceNode))
@@ -429,7 +429,7 @@ vector<DocumentHighlight> LanguageServer::semanticHighlight(DocumentPosition _do
 	else if (auto const* memberAccess = dynamic_cast<MemberAccess const*>(sourceNode))
 	{
 		Type const* type = memberAccess->expression().annotation().type;
-		if (auto const ttype = dynamic_cast<TypeType const*>(type))
+		if (auto const* ttype = dynamic_cast<TypeType const*>(type))
 		{
 			auto const memberName = memberAccess->memberName();
 
@@ -437,15 +437,16 @@ vector<DocumentHighlight> LanguageServer::semanticHighlight(DocumentPosition _do
 			{
 				// find the definition
 				vector<DocumentHighlight> output;
-				for (auto const& enumMember: enumType->enumDefinition().members())
+				for (ASTPointer<EnumValue> const& enumMember: enumType->enumDefinition().members())
 					if (enumMember->name() == memberName)
 						output += ReferenceCollector::collect(enumMember.get(), sourceUnit, enumMember->name());
 
 				// TODO: find uses of the enum value
 			}
 		}
-		else if (auto const structType = dynamic_cast<StructType const*>(type))
+		else if (auto const* structType = dynamic_cast<StructType const*>(type))
 		{
+			(void) structType; // TODO
 			// TODO: highlight all struct member occurrences.
 			// memberAccess->memberName()
 			// structType->
@@ -600,10 +601,7 @@ void LanguageServer::handleGotoDefinition(MessageID _id, Json::Value const& _arg
 	}
 	else if (auto const* identifier = dynamic_cast<Identifier const*>(sourceNode))
 	{
-		if (Declaration const* decl = identifier->annotation().referencedDeclaration)
-			if (auto location = declarationPosition(decl); location.has_value())
-				locations.emplace_back(move(location.value()));
-		for (auto const declaration: identifier->annotation().candidateDeclarations)
+		for (auto const* declaration: allAnnotatedDeclarations(identifier))
 			if (auto location = declarationPosition(declaration); location.has_value())
 				locations.emplace_back(move(location.value()));
 	}
@@ -711,14 +709,8 @@ void LanguageServer::handleTextDocumentReferences(MessageID _id, Json::Value con
 	}
 	else if (auto const* identifier = dynamic_cast<Identifier const*>(sourceNode))
 	{
-		if (auto decl = identifier->annotation().referencedDeclaration)
-			output += findAllReferences(decl, decl->name(), sourceUnit);
-
-		for (auto const decl: identifier->annotation().candidateDeclarations)
-			output += findAllReferences(decl, decl->name(), sourceUnit);
-
-		for (auto const decl: identifier->annotation().overloadedDeclarations)
-			output += findAllReferences(decl, decl->name(), sourceUnit);
+		for (auto const* declaration: allAnnotatedDeclarations(identifier))
+			output += findAllReferences(declaration, declaration->name(), sourceUnit);
 	}
 	else if (auto const* identifierPath = dynamic_cast<IdentifierPath const*>(sourceNode))
 	{

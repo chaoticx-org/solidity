@@ -43,7 +43,6 @@ public:
 
 private:
 	bool tryAddReference(frontend::Declaration const* _declaration, solidity::langutil::SourceLocation const& _location);
-	void addReference(solidity::langutil::SourceLocation const& _location);
 
 private:
 	frontend::Declaration const& m_declaration;

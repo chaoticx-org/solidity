@@ -20,12 +20,9 @@
 #include <libsolidity/ast/AST.h>
 #include <libsolidity/lsp/LanguageServer.h>
 
-using std::move;
-using std::vector;
-using std::string;
-
-using namespace std::string_literals;
 using namespace solidity::frontend;
+using namespace std::string_literals;
+using namespace std;
 
 namespace solidity::lsp
 {
@@ -49,7 +46,7 @@ std::vector<DocumentHighlight> ReferenceCollector::collect(
 		return {};
 
 	// TODO if vardecl, just use decl's scope (for lower overhead).
-	auto collector = ReferenceCollector(*_declaration, _sourceIdentifierName);
+	ReferenceCollector collector(*_declaration, _sourceIdentifierName);
 	_ast.accept(collector);
 	return move(collector.m_result);
 }
@@ -59,7 +56,7 @@ void ReferenceCollector::endVisit(frontend::ImportDirective const& _import)
 	for (auto const& symbolAlias: _import.symbolAliases())
 		if (m_sourceIdentifierName == *symbolAlias.alias)
 		{
-			addReference(symbolAlias.location);
+			m_result.emplace_back(DocumentHighlight{symbolAlias.location, DocumentHighlightKind::Text});
 			break;
 		}
 }
@@ -69,7 +66,7 @@ bool ReferenceCollector::tryAddReference(frontend::Declaration const* _declarati
 	if (&m_declaration != _declaration)
 		return false;
 
-	addReference(_location);
+	m_result.emplace_back(DocumentHighlight{_location, DocumentHighlightKind::Text});
 	return true;
 }
 
@@ -78,10 +75,7 @@ void ReferenceCollector::endVisit(frontend::Identifier const& _identifier)
 	if (auto const* declaration = _identifier.annotation().referencedDeclaration)
 		tryAddReference(declaration, _identifier.location());
 
-	for (auto const* declaration: _identifier.annotation().candidateDeclarations)
-		tryAddReference(declaration, _identifier.location());
-
-	for (auto const* declaration: _identifier.annotation().overloadedDeclarations)
+	for (auto const* declaration: _identifier.annotation().candidateDeclarations + _identifier.annotation().overloadedDeclarations)
 		tryAddReference(declaration, _identifier.location());
 }
 
@@ -93,26 +87,20 @@ void ReferenceCollector::endVisit(frontend::IdentifierPath  const& _identifierPa
 void ReferenceCollector::endVisit(frontend::MemberAccess const& _memberAccess)
 {
 	if (_memberAccess.annotation().referencedDeclaration == &m_declaration)
-		addReference(_memberAccess.location());
+		m_result.emplace_back(DocumentHighlight{_memberAccess.location(), DocumentHighlightKind::Text});
 }
 
 bool ReferenceCollector::visitNode(frontend::ASTNode const& _node)
 {
 	if (&_node == &m_declaration)
 	{
-		if (auto const* decl = dynamic_cast<Declaration const*>(&_node))
-			addReference(decl->nameLocation());
+		if (auto const* declaration = dynamic_cast<Declaration const*>(&_node))
+			m_result.emplace_back(DocumentHighlight{declaration->nameLocation(), DocumentHighlightKind::Text});
 		else
-			addReference(_node.location());
+			m_result.emplace_back(DocumentHighlight{_node.location(), DocumentHighlightKind::Text});
 	}
 
 	return true;
-}
-
-void ReferenceCollector::addReference(solidity::langutil::SourceLocation const& _location)
-{
-	// TODO: kill this function & inline the one-liner?
-	m_result.emplace_back(DocumentHighlight{_location, DocumentHighlightKind::Text});
 }
 
 }

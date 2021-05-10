@@ -17,6 +17,7 @@
 // SPDX-License-Identifier: GPL-3.0
 #pragma once
 
+#include <libsolidity/ast/AST.h>
 #include <libsolidity/formal/ModelCheckerSettings.h>
 #include <libsolidity/interface/CompilerStack.h>
 #include <libsolidity/interface/FileReader.h>
@@ -24,8 +25,6 @@
 #include <libsolidity/lsp/LSPTypes.h>
 #include <libsolidity/lsp/ReferenceCollector.h>
 #include <libsolidity/lsp/Transport.h>
-
-#include <libsolidity/ast/AST.h>
 
 #include <liblangutil/SourceReferenceExtractor.h>
 
@@ -47,11 +46,6 @@
 #include <unordered_map>
 #include <variant>
 #include <vector>
-
-namespace solidity::frontend
-{
-class Declaration;
-}
 
 namespace solidity::lsp
 {
