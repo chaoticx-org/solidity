@@ -22,7 +22,7 @@
 set -e
 
 source scripts/common.sh
-source test/externalTests/common.sh
+source scripts/externalTests/common.sh
 
 REPO_ROOT=$(realpath "$(dirname "$0")/../..")
 
@@ -37,7 +37,6 @@ function test_fn { UPDATE_SNAPSHOT=1 npx hardhat test; }
 function uniswap_test
 {
     local repo="https://github.com/solidity-external-tests/uniswap-v3-core.git"
-    local ref_type=branch
     local ref=main_080
     local config_file="hardhat.config.ts"
     local config_var=config
@@ -45,8 +44,8 @@ function uniswap_test
     local compile_only_presets=()
     local settings_presets=(
         "${compile_only_presets[@]}"
-        #ir-no-optimize           # Compilation fails with: "YulException: Variable ret_0 is 1 slot(s) too deep inside the stack."
-        #ir-optimize-evm-only     # Compilation fails with: "YulException: Variable ret_0 is 1 slot(s) too deep inside the stack."
+        ir-no-optimize
+        ir-optimize-evm-only
         ir-optimize-evm+yul
         legacy-no-optimize
         legacy-optimize-evm-only
@@ -57,11 +56,11 @@ function uniswap_test
     print_presets_or_exit "$SELECTED_PRESETS"
 
     setup_solc "$DIR" "$BINARY_TYPE" "$BINARY_PATH"
-    download_project "$repo" "$ref_type" "$ref" "$DIR"
+    download_project "$repo" "$ref" "$DIR"
 
     # Disable tests that won't pass on the ir presets due to Hardhat heuristics. Note that this also disables
     # them for other presets but that's fine - we want same code run for benchmarks to be comparable.
-    # TODO: Remove this when https://github.com/NomicFoundation/hardhat/issues/2115 gets fixed.
+    # TODO: Remove this when https://github.com/NomicFoundation/hardhat/issues/3365 gets fixed.
     sed -i "s|it\(('underpay zero for one and exact in',\)|it.skip\1|g" test/UniswapV3Pool.spec.ts
     sed -i "s|it\(('pay in the wrong token zero for one and exact in',\)|it.skip\1|g" test/UniswapV3Pool.spec.ts
     sed -i "s|it\(('underpay zero for one and exact out',\)|it.skip\1|g" test/UniswapV3Pool.spec.ts
@@ -83,15 +82,18 @@ function uniswap_test
     #   "revert SPL" is expected but the message is "reverted with reason string 'SPL'" in 2.5.0.
     # - Newer versions of ethereumjs/tx have an issue with 'gteHardfork()' method.
     neutralize_package_lock
-    yarn add hardhat@2.4.3
-    yarn add @ethereumjs/tx@3.1.3
 
-    yarn install
-    yarn add hardhat-gas-reporter
+    pnpm install
+    pnpm install hardhat-gas-reporter
 
     # With ethers.js 5.6.2 many tests for revert messages fail.
     # TODO: Remove when https://github.com/ethers-io/ethers.js/discussions/2849 is resolved.
-    yarn add ethers@5.6.1
+    pnpm install ethers@5.6.1
+
+    # We set hardhat version to 2.20.0 since version 2.21.0 has issues with solidity-coverage plugin
+    # that often causes out-of-memory errors.
+    # See hardhat note about the issue here: https://github.com/NomicFoundation/hardhat/releases/tag/hardhat@2.21.0
+    pnpm install hardhat@2.20.0
 
     replace_version_pragmas
 

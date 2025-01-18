@@ -23,7 +23,6 @@
 
 #include <fmt/format.h>
 
-using namespace std;
 using namespace solidity::langutil;
 using namespace solidity::frontend;
 
@@ -33,10 +32,10 @@ namespace solidity::lsp
 namespace
 {
 
-optional<SemanticTokenType> semanticTokenTypeForType(frontend::Type const* _type)
+std::optional<SemanticTokenType> semanticTokenTypeForType(frontend::Type const* _type)
 {
 	if (!_type)
-		return nullopt;
+		return std::nullopt;
 
 	switch (_type->category())
 	{
@@ -71,7 +70,7 @@ SemanticTokenType semanticTokenTypeForExpression(frontend::Type const* _type)
 
 } // end namespace
 
-Json::Value SemanticTokensBuilder::build(SourceUnit const& _sourceUnit, CharStream const& _charStream)
+Json SemanticTokensBuilder::build(SourceUnit const& _sourceUnit, CharStream const& _charStream)
 {
 	reset(&_charStream);
 	_sourceUnit.accept(*this);
@@ -80,7 +79,7 @@ Json::Value SemanticTokensBuilder::build(SourceUnit const& _sourceUnit, CharStre
 
 void SemanticTokensBuilder::reset(CharStream const* _charStream)
 {
-	m_encodedTokens = Json::arrayValue;
+	m_encodedTokens = Json::array();
 	m_charStream = _charStream;
 	m_lastLine = 0;
 	m_lastStartChar = 0;
@@ -119,16 +118,16 @@ void SemanticTokensBuilder::encode(
 	auto const [line, startChar] = m_charStream->translatePositionToLineColumn(_sourceLocation.start);
 	auto const length = _sourceLocation.end - _sourceLocation.start;
 
-	lspDebug(fmt::format("encode [{}:{}..{}] {}", line, startChar, length, _tokenType));
+	lspDebug(fmt::format("encode [{}:{}..{}] {}", line, startChar, length, static_cast<int>(_tokenType)));
 
-	m_encodedTokens.append(line - m_lastLine);
+	m_encodedTokens.emplace_back(line - m_lastLine);
 	if (line == m_lastLine)
-		m_encodedTokens.append(startChar - m_lastStartChar);
+		m_encodedTokens.emplace_back(startChar - m_lastStartChar);
 	else
-		m_encodedTokens.append(startChar);
-	m_encodedTokens.append(length);
-	m_encodedTokens.append(static_cast<int>(_tokenType));
-	m_encodedTokens.append(static_cast<int>(_modifiers));
+		m_encodedTokens.emplace_back(startChar);
+	m_encodedTokens.emplace_back(length);
+	m_encodedTokens.emplace_back(static_cast<int>(_tokenType));
+	m_encodedTokens.emplace_back(static_cast<int>(_modifiers));
 
 	m_lastLine = line;
 	m_lastStartChar = startChar;

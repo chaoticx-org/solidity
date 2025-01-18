@@ -34,7 +34,6 @@
 #include <string>
 #include <utility>
 
-using namespace std;
 using namespace solidity;
 using namespace solidity::yul;
 using namespace solidity::langutil;
@@ -43,63 +42,65 @@ using namespace solidity::util::formatting;
 using namespace solidity::frontend::test;
 using namespace boost::algorithm;
 using namespace boost::unit_test;
+using namespace std::string_literals;
 namespace fs = boost::filesystem;
 
+std::ostream& solidity::frontend::test::operator<<(std::ostream& _output, RequiresYulOptimizer _requiresYulOptimizer)
+{
+	switch (_requiresYulOptimizer)
+	{
+	case RequiresYulOptimizer::False: _output << "false"; break;
+	case RequiresYulOptimizer::MinimalStack: _output << "minimalStack"; break;
+	case RequiresYulOptimizer::Full: _output << "full"; break;
+	}
+	return _output;
+}
+
 SemanticTest::SemanticTest(
-	string const& _filename,
+	std::string const& _filename,
 	langutil::EVMVersion _evmVersion,
-	vector<boost::filesystem::path> const& _vmPaths,
-	bool _enforceCompileToEwasm,
+	std::optional<uint8_t> _eofVersion,
+	std::vector<boost::filesystem::path> const& _vmPaths,
 	bool _enforceGasCost,
 	u256 _enforceGasCostMinValue
 ):
-	SolidityExecutionFramework(_evmVersion, _vmPaths),
+	SolidityExecutionFramework(_evmVersion, _eofVersion, _vmPaths, false),
 	EVMVersionRestrictedTestCase(_filename),
 	m_sources(m_reader.sources()),
 	m_lineOffset(m_reader.lineNumber()),
 	m_builtins(makeBuiltins()),
 	m_sideEffectHooks(makeSideEffectHooks()),
-	m_enforceCompileToEwasm(_enforceCompileToEwasm),
 	m_enforceGasCost(_enforceGasCost),
-	m_enforceGasCostMinValue(move(_enforceGasCostMinValue))
+	m_enforceGasCostMinValue(std::move(_enforceGasCostMinValue))
 {
-	static set<string> const compileViaYulAllowedValues{"also", "true", "false"};
-	static set<string> const yulRunTriggers{"also", "true"};
-	static set<string> const legacyRunTriggers{"also", "false", "default"};
+	static std::set<std::string> const compileViaYulAllowedValues{"also", "true", "false"};
+	static std::set<std::string> const yulRunTriggers{"also", "true"};
+	static std::set<std::string> const legacyRunTriggers{"also", "false", "default"};
+
+	m_requiresYulOptimizer = m_reader.enumSetting<RequiresYulOptimizer>(
+		"requiresYulOptimizer",
+		{
+			{toString(RequiresYulOptimizer::False), RequiresYulOptimizer::False},
+			{toString(RequiresYulOptimizer::MinimalStack), RequiresYulOptimizer::MinimalStack},
+			{toString(RequiresYulOptimizer::Full), RequiresYulOptimizer::Full},
+		},
+		toString(RequiresYulOptimizer::False)
+	);
 
 	m_runWithABIEncoderV1Only = m_reader.boolSetting("ABIEncoderV1Only", false);
 	if (m_runWithABIEncoderV1Only && !solidity::test::CommonOptions::get().useABIEncoderV1)
 		m_shouldRun = false;
 
-	string compileViaYul = m_reader.stringSetting("compileViaYul", "also");
+	std::string compileViaYul = m_reader.stringSetting("compileViaYul", "also");
 	if (m_runWithABIEncoderV1Only && compileViaYul != "false")
-		BOOST_THROW_EXCEPTION(runtime_error(
+		BOOST_THROW_EXCEPTION(std::runtime_error(
 			"ABIEncoderV1Only tests cannot be run via yul, "
 			"so they need to also specify ``compileViaYul: false``"
 		));
 	if (!util::contains(compileViaYulAllowedValues, compileViaYul))
-		BOOST_THROW_EXCEPTION(runtime_error("Invalid compileViaYul value: " + compileViaYul + "."));
+		BOOST_THROW_EXCEPTION(std::runtime_error("Invalid compileViaYul value: " + compileViaYul + "."));
 	m_testCaseWantsYulRun = util::contains(yulRunTriggers, compileViaYul);
 	m_testCaseWantsLegacyRun = util::contains(legacyRunTriggers, compileViaYul);
-
-	// Do not enforce ewasm, if via yul was explicitly denied.
-	if (compileViaYul == "false")
-		m_enforceCompileToEwasm = false;
-
-	string compileToEwasm = m_reader.stringSetting("compileToEwasm", "false");
-	if (compileToEwasm == "also")
-		m_testCaseWantsEwasmRun = true;
-	else if (compileToEwasm == "false")
-		m_testCaseWantsEwasmRun = false;
-	else
-		BOOST_THROW_EXCEPTION(runtime_error("Invalid compileToEwasm value: " + compileToEwasm + "."));
-
-	if (m_testCaseWantsEwasmRun && !m_testCaseWantsYulRun)
-		BOOST_THROW_EXCEPTION(runtime_error("Invalid compileToEwasm value: " + compileToEwasm + ", compileViaYul need to be enabled."));
-
-	// run ewasm tests only if an ewasm evmc vm was defined
-	if (m_testCaseWantsEwasmRun && !m_supportsEwasm)
-		m_testCaseWantsEwasmRun = false;
 
 	auto revertStrings = revertStringsFromString(m_reader.stringSetting("revertStrings", "default"));
 	soltestAssert(revertStrings, "Invalid revertStrings setting.");
@@ -117,19 +118,19 @@ SemanticTest::SemanticTest(
 	}
 }
 
-map<string, Builtin> SemanticTest::makeBuiltins()
+std::map<std::string, Builtin> SemanticTest::makeBuiltins()
 {
 	return {
 		{
 			"isoltest_builtin_test",
-			[](FunctionCall const&) -> optional<bytes>
+			[](FunctionCall const&) -> std::optional<bytes>
 			{
 				return toBigEndian(u256(0x1234));
 			}
 		},
 		{
 			"isoltest_side_effects_test",
-			[](FunctionCall const& _call) -> optional<bytes>
+			[](FunctionCall const& _call) -> std::optional<bytes>
 			{
 				if (_call.arguments.parameters.empty())
 					return toBigEndian(0);
@@ -139,7 +140,7 @@ map<string, Builtin> SemanticTest::makeBuiltins()
 		},
 		{
 			"balance",
-			[this](FunctionCall const& _call) -> optional<bytes>
+			[this](FunctionCall const& _call) -> std::optional<bytes>
 			{
 				soltestAssert(_call.arguments.parameters.size() <= 1, "Account address expected.");
 				h160 address;
@@ -152,15 +153,15 @@ map<string, Builtin> SemanticTest::makeBuiltins()
 		},
 		{
 			"storageEmpty",
-			[this](FunctionCall const& _call) -> optional<bytes>
+			[this](FunctionCall const& _call) -> std::optional<bytes>
 			{
 				soltestAssert(_call.arguments.parameters.empty(), "No arguments expected.");
 				return toBigEndian(u256(storageEmpty(m_contractAddress) ? 1 : 0));
-		 	}
+			}
 		},
 		{
 			"account",
-			[this](FunctionCall const& _call) -> optional<bytes>
+			[this](FunctionCall const& _call) -> std::optional<bytes>
 			{
 				soltestAssert(_call.arguments.parameters.size() == 1, "Account number expected.");
 				size_t accountNumber = static_cast<size_t>(stoi(_call.arguments.parameters.at(0).rawString));
@@ -171,15 +172,15 @@ map<string, Builtin> SemanticTest::makeBuiltins()
 	};
 }
 
-vector<SideEffectHook> SemanticTest::makeSideEffectHooks() const
+std::vector<SideEffectHook> SemanticTest::makeSideEffectHooks() const
 {
 	using namespace std::placeholders;
 	return {
-		[](FunctionCall const& _call) -> vector<string>
+		[](FunctionCall const& _call) -> std::vector<std::string>
 		{
 			if (_call.signature == "isoltest_side_effects_test")
 			{
-				vector<string> result;
+				std::vector<std::string> result;
 				for (auto const& argument: _call.arguments.parameters)
 					result.emplace_back(util::toHex(argument.rawBytes));
 				return result;
@@ -190,7 +191,7 @@ vector<SideEffectHook> SemanticTest::makeSideEffectHooks() const
 	};
 }
 
-string SemanticTest::formatEventParameter(optional<AnnotatedEventSignature> _signature, bool _indexed, size_t _index, bytes const& _data)
+std::string SemanticTest::formatEventParameter(std::optional<AnnotatedEventSignature> _signature, bool _indexed, size_t _index, bytes const& _data)
 {
 	auto isPrintableASCII = [](bytes const& s)
 	{
@@ -213,7 +214,7 @@ string SemanticTest::formatEventParameter(optional<AnnotatedEventSignature> _sig
 		abiType = ABIType(ABIType::Type::String);
 	if (_signature.has_value())
 	{
-		vector<string> const& types = _indexed ? _signature->indexedTypes : _signature->nonIndexedTypes;
+		std::vector<std::string> const& types = _indexed ? _signature->indexedTypes : _signature->nonIndexedTypes;
 		if (_index < types.size())
 		{
 			if (types.at(_index) == "bool")
@@ -223,16 +224,16 @@ string SemanticTest::formatEventParameter(optional<AnnotatedEventSignature> _sig
 	return BytesUtils::formatBytes(_data, abiType);
 }
 
-vector<string> SemanticTest::eventSideEffectHook(FunctionCall const&) const
+std::vector<std::string> SemanticTest::eventSideEffectHook(FunctionCall const&) const
 {
-	vector<string> sideEffects;
-	vector<LogRecord> recordedLogs = ExecutionFramework::recordedLogs();
+	std::vector<std::string> sideEffects;
+	std::vector<LogRecord> recordedLogs = ExecutionFramework::recordedLogs();
 	for (LogRecord const& log: recordedLogs)
 	{
-		optional<AnnotatedEventSignature> eventSignature;
+		std::optional<AnnotatedEventSignature> eventSignature;
 		if (!log.topics.empty())
 			eventSignature = matchEvent(log.topics[0]);
-		stringstream sideEffect;
+		std::stringstream sideEffect;
 		sideEffect << "emit ";
 		if (eventSignature.has_value())
 			sideEffect << eventSignature.value().signature;
@@ -242,7 +243,7 @@ vector<string> SemanticTest::eventSideEffectHook(FunctionCall const&) const
 		if (m_contractAddress != log.creator)
 			sideEffect << " from 0x" << log.creator;
 
-		vector<string> eventStrings;
+		std::vector<std::string> eventStrings;
 		size_t index{0};
 		for (h256 const& topic: log.topics)
 		{
@@ -267,13 +268,13 @@ vector<string> SemanticTest::eventSideEffectHook(FunctionCall const&) const
 	return sideEffects;
 }
 
-optional<AnnotatedEventSignature> SemanticTest::matchEvent(util::h256 const& hash) const
+std::optional<AnnotatedEventSignature> SemanticTest::matchEvent(util::h256 const& hash) const
 {
-	optional<AnnotatedEventSignature> result;
-	for (string& contractName: m_compiler.contractNames())
+	std::optional<AnnotatedEventSignature> result;
+	for (std::string& contractName: m_compiler.contractNames())
 	{
 		ContractDefinition const& contract = m_compiler.contractDefinition(contractName);
-		for (EventDefinition const* event: contract.events())
+		for (EventDefinition const* event: contract.events() + contract.usedInterfaceEvents())
 		{
 			FunctionTypePointer eventFunctionType = event->functionType(true);
 			if (!event->isAnonymous() && keccak256(eventFunctionType->externalSignature()) == hash)
@@ -292,28 +293,38 @@ optional<AnnotatedEventSignature> SemanticTest::matchEvent(util::h256 const& has
 	return result;
 }
 
-TestCase::TestResult SemanticTest::run(ostream& _stream, string const& _linePrefix, bool _formatted)
+frontend::OptimiserSettings SemanticTest::optimizerSettingsFor(RequiresYulOptimizer _requiresYulOptimizer)
+{
+	switch (_requiresYulOptimizer)
+	{
+	case RequiresYulOptimizer::False:
+		return OptimiserSettings::minimal();
+	case RequiresYulOptimizer::MinimalStack:
+	{
+		OptimiserSettings settings = OptimiserSettings::minimal();
+		settings.runYulOptimiser = true;
+		settings.yulOptimiserSteps = "uljmul jmul";
+		return settings;
+	}
+	case RequiresYulOptimizer::Full:
+		return OptimiserSettings::full();
+	}
+	unreachable();
+}
+
+TestCase::TestResult SemanticTest::run(std::ostream& _stream, std::string const& _linePrefix, bool _formatted)
 {
 	TestResult result = TestResult::Success;
 
-	if (m_testCaseWantsLegacyRun)
-		result = runTest(_stream, _linePrefix, _formatted, false, false);
+	if (m_testCaseWantsLegacyRun && !m_eofVersion.has_value())
+		result = runTest(_stream, _linePrefix, _formatted, false /* _isYulRun */);
 
 	if (m_testCaseWantsYulRun && result == TestResult::Success)
-		result = runTest(_stream, _linePrefix, _formatted, true, false);
-
-	if ((m_testCaseWantsEwasmRun || m_enforceCompileToEwasm) && result == TestResult::Success)
 	{
-		// TODO: Once we have full Ewasm support, we could remove try/catch here.
-		try
-		{
-			result = runTest(_stream, _linePrefix, _formatted, true, true);
-		}
-		catch (...)
-		{
-			if (!m_enforceCompileToEwasm)
-				throw;
-		}
+		if (solidity::test::CommonOptions::get().optimize)
+			result = runTest(_stream, _linePrefix, _formatted, true /* _isYulRun */);
+		else
+			result = tryRunTestWithYulOptimizer(_stream, _linePrefix, _formatted);
 	}
 
 	if (result != TestResult::Success)
@@ -327,41 +338,28 @@ TestCase::TestResult SemanticTest::run(ostream& _stream, string const& _linePref
 }
 
 TestCase::TestResult SemanticTest::runTest(
-	ostream& _stream,
-	string const& _linePrefix,
+	std::ostream& _stream,
+	std::string const& _linePrefix,
 	bool _formatted,
-	bool _isYulRun,
-	bool _isEwasmRun)
+	bool _isYulRun
+)
 {
 	bool success = true;
 	m_gasCostFailure = false;
 
-	if (_isEwasmRun)
-	{
-		soltestAssert(_isYulRun, "");
-		selectVM(evmc_capabilities::EVMC_CAPABILITY_EWASM);
-	}
-	else
-		selectVM(evmc_capabilities::EVMC_CAPABILITY_EVM1);
+	selectVM(evmc_capabilities::EVMC_CAPABILITY_EVM1);
 
 	reset();
 
 	m_compileViaYul = _isYulRun;
-	if (_isEwasmRun)
-	{
-		soltestAssert(m_compileViaYul, "");
-		m_compileToEwasm = _isEwasmRun;
-	}
-
-	m_canEnableEwasmRun = false;
 
 	if (_isYulRun)
-		AnsiColorized(_stream, _formatted, {BOLD, CYAN}) << _linePrefix << "Running via Yul" << (_isEwasmRun ? " (ewasm):" : ":") << endl;
+		AnsiColorized(_stream, _formatted, {BOLD, CYAN}) << _linePrefix << "Running via Yul: " << std::endl;
 
 	for (TestFunctionCall& test: m_tests)
 		test.reset();
 
-	map<string, solidity::test::Address> libraries;
+	std::map<std::string, solidity::test::Address> libraries;
 
 	bool constructed = false;
 
@@ -418,7 +416,7 @@ TestCase::TestResult SemanticTest::runTest(
 				output = callLowLevel(test.call().arguments.rawBytes(), test.call().value.value);
 			else if (test.call().kind == FunctionCall::Kind::Builtin)
 			{
-				optional<bytes> builtinOutput = m_builtins.at(test.call().signature)(test.call());
+				std::optional<bytes> builtinOutput = m_builtins.at(test.call().signature)(test.call());
 				if (builtinOutput.has_value())
 				{
 					m_transactionSuccessful = true;
@@ -431,7 +429,7 @@ TestCase::TestResult SemanticTest::runTest(
 			{
 				soltestAssert(
 					m_allowNonExistingFunctions ||
-					m_compiler.interfaceSymbols(m_compiler.lastContractName(m_sources.mainSourceFile))["methods"].isMember(test.call().signature),
+					m_compiler.interfaceSymbols(m_compiler.lastContractName(m_sources.mainSourceFile))["methods"].contains(test.call().signature),
 					"The function " + test.call().signature + " is not known to the compiler"
 				);
 
@@ -457,44 +455,22 @@ TestCase::TestResult SemanticTest::runTest(
 				success = false;
 
 			test.setFailure(!m_transactionSuccessful);
-			test.setRawBytes(move(output));
-			test.setContractABI(m_compiler.contractABI(m_compiler.lastContractName(m_sources.mainSourceFile)));
+			test.setRawBytes(std::move(output));
+			if (test.call().kind != FunctionCall::Kind::LowLevel)
+				test.setContractABI(m_compiler.contractABI(m_compiler.lastContractName(m_sources.mainSourceFile)));
 		}
 
-		vector<string> effects;
+		std::vector<std::string> effects;
 		for (SideEffectHook const& hook: m_sideEffectHooks)
 			effects += hook(test.call());
-		test.setSideEffects(move(effects));
+		test.setSideEffects(std::move(effects));
 
 		success &= test.call().expectedSideEffects == test.call().actualSideEffects;
 	}
 
-	// Right now we have sometimes different test results in Yul vs. Ewasm.
-	// The main reason is that Ewasm just returns a failure in some cases.
-	// TODO: If Ewasm support got fully implemented, we could implement this in the same way as above.
-	if (success && !m_testCaseWantsEwasmRun && _isEwasmRun)
-	{
-		// TODO: There is something missing in Ewasm to support other types of revert strings:
-		//  for now, we just ignore test-cases that do not use RevertStrings::Default.
-		if (m_revertStrings != RevertStrings::Default)
-			return TestResult::Success;
-
-		m_canEnableEwasmRun = true;
-		AnsiColorized(_stream, _formatted, {BOLD, YELLOW}) <<
-			_linePrefix << endl <<
-			_linePrefix << "Test can pass via Yul (Ewasm), but marked with \"compileToEwasm: false.\"" << endl;
-		return TestResult::Failure;
-	}
-
 	if (!success)
 	{
-		// Ignore failing tests that can't yet get compiled to Ewasm:
-		// if the test run was not successful and enforce compiling to ewasm was set,
-		// but the test case did not want to get run with Ewasm, we just ignore this failure.
-		if (m_enforceCompileToEwasm && !m_testCaseWantsEwasmRun)
-			return TestResult::Success;
-
-		AnsiColorized(_stream, _formatted, {BOLD, CYAN}) << _linePrefix << "Expected result:" << endl;
+		AnsiColorized(_stream, _formatted, {BOLD, CYAN}) << _linePrefix << "Expected result:" << std::endl;
 		for (TestFunctionCall const& test: m_tests)
 		{
 			ErrorReporter errorReporter;
@@ -504,11 +480,11 @@ TestCase::TestResult SemanticTest::runTest(
 				TestFunctionCall::RenderMode::ExpectedValuesExpectedGas,
 				_formatted,
 				/* _interactivePrint */ true
-			) << endl;
+			) << std::endl;
 			_stream << errorReporter.format(_linePrefix, _formatted);
 		}
-		_stream << endl;
-		AnsiColorized(_stream, _formatted, {BOLD, CYAN}) << _linePrefix << "Obtained result:" << endl;
+		_stream << std::endl;
+		AnsiColorized(_stream, _formatted, {BOLD, CYAN}) << _linePrefix << "Obtained result:" << std::endl;
 		for (TestFunctionCall const& test: m_tests)
 		{
 			ErrorReporter errorReporter;
@@ -518,33 +494,85 @@ TestCase::TestResult SemanticTest::runTest(
 				m_gasCostFailure ? TestFunctionCall::RenderMode::ExpectedValuesActualGas : TestFunctionCall::RenderMode::ActualValuesExpectedGas,
 				_formatted,
 				/* _interactivePrint */ true
-			) << endl;
+			) << std::endl;
 			_stream << errorReporter.format(_linePrefix, _formatted);
 		}
 		AnsiColorized(_stream, _formatted, {BOLD, RED})
-			<< _linePrefix << endl
-			<< _linePrefix << "Attention: Updates on the test will apply the detected format displayed." << endl;
+			<< _linePrefix << std::endl
+			<< _linePrefix << "Attention: Updates on the test will apply the detected format displayed." << std::endl;
 		if (_isYulRun && m_testCaseWantsLegacyRun)
 		{
-			_stream << _linePrefix << endl << _linePrefix;
+			_stream << _linePrefix << std::endl << _linePrefix;
 			AnsiColorized(_stream, _formatted, {RED_BACKGROUND}) << "Note that the test passed without Yul.";
-			_stream << endl;
+			_stream << std::endl;
 		}
 		else if (!_isYulRun && m_testCaseWantsYulRun)
 			AnsiColorized(_stream, _formatted, {BOLD, YELLOW})
-				<< _linePrefix << endl
-				<< _linePrefix << "Note that the test also has to pass via Yul." << endl;
+				<< _linePrefix << std::endl
+				<< _linePrefix << "Note that the test also has to pass via Yul." << std::endl;
 		return TestResult::Failure;
 	}
 
 	return TestResult::Success;
 }
 
+TestCase::TestResult SemanticTest::tryRunTestWithYulOptimizer(
+	std::ostream& _stream,
+	std::string const& _linePrefix,
+	bool _formatted
+)
+{
+	TestResult result{};
+	for (auto requiresYulOptimizer: {
+		RequiresYulOptimizer::False,
+		RequiresYulOptimizer::MinimalStack,
+		RequiresYulOptimizer::Full,
+	})
+	{
+		ScopedSaveAndRestore optimizerSettings(
+			m_optimiserSettings,
+			optimizerSettingsFor(requiresYulOptimizer)
+		);
+
+		try
+		{
+			result = runTest(_stream, _linePrefix, _formatted, true /* _isYulRun */);
+		}
+		catch (yul::StackTooDeepError const&)
+		{
+			if (requiresYulOptimizer == RequiresYulOptimizer::Full)
+				throw;
+			else
+				continue;
+		}
+
+		if (m_requiresYulOptimizer != requiresYulOptimizer && result != TestResult::FatalError)
+		{
+			soltestAssert(result == TestResult::Success || result == TestResult::Failure);
+
+			AnsiColorized(_stream, _formatted, {BOLD, YELLOW})
+				<< _linePrefix << std::endl
+				<< _linePrefix << "requiresYulOptimizer is set to " << m_requiresYulOptimizer
+				<< " but should be " << requiresYulOptimizer << std::endl;
+			m_requiresYulOptimizer = requiresYulOptimizer;
+			return TestResult::Failure;
+		}
+
+		return result;
+	}
+	unreachable();
+}
+
 bool SemanticTest::checkGasCostExpectation(TestFunctionCall& io_test, bool _compileViaYul) const
 {
-	string setting =
+	std::string setting =
 		(_compileViaYul ? "ir"s : "legacy"s) +
 		(m_optimiserSettings == OptimiserSettings::full() ? "Optimized" : "");
+
+	soltestAssert(
+		io_test.call().expectations.gasUsedExcludingCode.count(setting) ==
+		io_test.call().expectations.gasUsedForCodeDeposit.count(setting)
+	);
 
 	// We don't check gas if enforce gas cost is not active
 	// or test is run with abi encoder v1 only
@@ -556,40 +584,46 @@ bool SemanticTest::checkGasCostExpectation(TestFunctionCall& io_test, bool _comp
 		!m_enforceGasCost ||
 		m_gasUsed < m_enforceGasCostMinValue ||
 		m_gasUsed >= InitialGas ||
-		(setting == "ir" && io_test.call().expectations.gasUsed.count(setting) == 0) ||
+		(setting == "ir" && io_test.call().expectations.gasUsedExcludingCode.count(setting) == 0) ||
 		io_test.call().kind == FunctionCall::Kind::Builtin
 	)
 		return true;
 
 	solAssert(!m_runWithABIEncoderV1Only, "");
 
-	io_test.setGasCost(setting, m_gasUsed);
+	// NOTE: Cost excluding code is unlikely to be negative but it may still be possible due to refunds.
+	// We'll deal with it when we actually have a test case like that.
+	solUnimplementedAssert(m_gasUsed >= m_gasUsedForCodeDeposit);
+	io_test.setGasCostExcludingCode(setting, m_gasUsed - m_gasUsedForCodeDeposit);
+	io_test.setCodeDepositGasCost(setting, m_gasUsedForCodeDeposit);
+
 	return
-		io_test.call().expectations.gasUsed.count(setting) > 0 &&
-		m_gasUsed == io_test.call().expectations.gasUsed.at(setting);
+		io_test.call().expectations.gasUsedExcludingCode.count(setting) > 0 &&
+		m_gasUsed - m_gasUsedForCodeDeposit == io_test.call().expectations.gasUsedExcludingCode.at(setting) &&
+		m_gasUsedForCodeDeposit == io_test.call().expectations.gasUsedForCodeDeposit.at(setting);
 }
 
-void SemanticTest::printSource(ostream& _stream, string const& _linePrefix, bool _formatted) const
+void SemanticTest::printSource(std::ostream& _stream, std::string const& _linePrefix, bool _formatted) const
 {
 	if (m_sources.sources.empty())
 		return;
 
 	bool outputNames = (m_sources.sources.size() - m_sources.externalSources.size() != 1 || !m_sources.sources.begin()->first.empty());
 
-	set<string> externals;
+	std::set<std::string> externals;
 	for (auto const& [name, path]: m_sources.externalSources)
 	{
 		externals.insert(name);
-		string externalSource;
+		std::string externalSource;
 		if (name == path)
 			externalSource = name;
 		else
 			externalSource = name + "=" + path.generic_string();
 
 		if (_formatted)
-			_stream << _linePrefix  << formatting::CYAN << "==== ExternalSource: " << externalSource << " ===="s << formatting::RESET << endl;
+			_stream << _linePrefix  << formatting::CYAN << "==== ExternalSource: " << externalSource << " ===="s << formatting::RESET << std::endl;
 		else
-			_stream << _linePrefix << "==== ExternalSource: " << externalSource << " ===="s << endl;
+			_stream << _linePrefix << "==== ExternalSource: " << externalSource << " ===="s << std::endl;
 	}
 
 	for (auto const& [name, source]: m_sources.sources)
@@ -602,9 +636,9 @@ void SemanticTest::printSource(ostream& _stream, string const& _linePrefix, bool
 
 				if (outputNames)
 					_stream << _linePrefix << formatting::CYAN << "==== Source: " << name
-							<< " ====" << formatting::RESET << endl;
+							<< " ====" << formatting::RESET << std::endl;
 
-				vector<char const*> sourceFormatting(source.length(), formatting::RESET);
+				std::vector<char const*> sourceFormatting(source.length(), formatting::RESET);
 				_stream << _linePrefix << sourceFormatting.front() << source.front();
 				for (size_t i = 1; i < source.length(); i++)
 				{
@@ -614,7 +648,7 @@ void SemanticTest::printSource(ostream& _stream, string const& _linePrefix, bool
 						_stream << source[i];
 					else
 					{
-						_stream << formatting::RESET << endl;
+						_stream << formatting::RESET << std::endl;
 						if (i + 1 < source.length())
 							_stream << _linePrefix << sourceFormatting[i];
 					}
@@ -624,55 +658,47 @@ void SemanticTest::printSource(ostream& _stream, string const& _linePrefix, bool
 			else
 			{
 				if (outputNames)
-					_stream << _linePrefix << "==== Source: " + name << " ====" << endl;
-				stringstream stream(source);
-				string line;
-				while (getline(stream, line))
-					_stream << _linePrefix << line << endl;
+					printPrefixed(_stream, "==== Source: " + name + " ====", _linePrefix);
+				printPrefixed(_stream, source, _linePrefix);
 			}
 		}
 }
 
-void SemanticTest::printUpdatedExpectations(ostream& _stream, string const&) const
+void SemanticTest::printUpdatedExpectations(std::ostream& _stream, std::string const&) const
 {
 	for (TestFunctionCall const& test: m_tests)
 		_stream << test.format(
 			"",
 			m_gasCostFailure ? TestFunctionCall::RenderMode::ExpectedValuesActualGas : TestFunctionCall::RenderMode::ActualValuesExpectedGas,
 			/* _highlight = */ false
-		) << endl;
+		) << std::endl;
 }
 
-void SemanticTest::printUpdatedSettings(ostream& _stream, string const& _linePrefix)
+void SemanticTest::printUpdatedSettings(std::ostream& _stream, std::string const& _linePrefix)
 {
 	auto& settings = m_reader.settings();
-	if (settings.empty() && !m_canEnableEwasmRun)
+	if (settings.empty() && m_requiresYulOptimizer == RequiresYulOptimizer::False)
 		return;
 
-	_stream << _linePrefix << "// ====" << endl;
-	if (m_canEnableEwasmRun)
-	{
-		soltestAssert(m_testCaseWantsYulRun, "");
-		_stream << _linePrefix << "// compileToEwasm: also\n";
-	}
+	_stream << _linePrefix << "// ====" << std::endl;
+	if (m_requiresYulOptimizer != RequiresYulOptimizer::False)
+		_stream << _linePrefix << "// requiresYulOptimizer: " << m_requiresYulOptimizer << std::endl;
 
 	for (auto const& [settingName, settingValue]: settings)
-		if (
-			!(settingName == "compileToEwasm" && m_canEnableEwasmRun)
-		)
-			_stream << _linePrefix << "// " << settingName << ": " << settingValue<< endl;
+		if (settingName != "requiresYulOptimizer")
+			_stream << _linePrefix << "// " << settingName << ": " << settingValue<< std::endl;
 }
 
-void SemanticTest::parseExpectations(istream& _stream)
+void SemanticTest::parseExpectations(std::istream& _stream)
 {
 	m_tests += TestFileParser{_stream, m_builtins}.parseFunctionCalls(m_lineOffset);
 }
 
 bool SemanticTest::deploy(
-	string const& _contractName,
+	std::string const& _contractName,
 	u256 const& _value,
 	bytes const& _arguments,
-	map<string, solidity::test::Address> const& _libraries
+	std::map<std::string, solidity::test::Address> const& _libraries
 )
 {
 	auto output = compileAndRunWithoutCheck(m_sources.sources, _value, _contractName, _arguments, _libraries, m_sources.mainSourceFile);

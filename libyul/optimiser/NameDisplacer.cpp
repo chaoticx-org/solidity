@@ -23,7 +23,6 @@
 
 #include <libyul/AST.h>
 
-using namespace std;
 using namespace solidity;
 using namespace solidity::yul;
 
@@ -34,7 +33,7 @@ void NameDisplacer::operator()(Identifier& _identifier)
 
 void NameDisplacer::operator()(VariableDeclaration& _varDecl)
 {
-	for (TypedName& var: _varDecl.variables)
+	for (NameWithDebugData& var: _varDecl.variables)
 		checkAndReplaceNew(var.name);
 
 	ASTModifier::operator()(_varDecl);
@@ -55,7 +54,8 @@ void NameDisplacer::operator()(FunctionDefinition& _function)
 
 void NameDisplacer::operator()(FunctionCall& _funCall)
 {
-	checkAndReplace(_funCall.functionName.name);
+	if (std::holds_alternative<Identifier>(_funCall.functionName))
+		checkAndReplace(std::get<Identifier>(_funCall.functionName).name);
 	ASTModifier::operator()(_funCall);
 }
 
@@ -64,20 +64,20 @@ void NameDisplacer::operator()(Block& _block)
 	// First replace all the names of function definitions
 	// because of scoping.
 	for (auto& st: _block.statements)
-		if (holds_alternative<FunctionDefinition>(st))
+		if (std::holds_alternative<FunctionDefinition>(st))
 			checkAndReplaceNew(std::get<FunctionDefinition>(st).name);
 
 	ASTModifier::operator()(_block);
 }
 
-void NameDisplacer::checkAndReplaceNew(YulString& _name)
+void NameDisplacer::checkAndReplaceNew(YulName& _name)
 {
 	yulAssert(!m_translations.count(_name), "");
 	if (m_namesToFree.count(_name))
 		_name = (m_translations[_name] = m_nameDispenser.newName(_name));
 }
 
-void NameDisplacer::checkAndReplace(YulString& _name) const
+void NameDisplacer::checkAndReplace(YulName& _name) const
 {
 	if (m_translations.count(_name))
 		_name = m_translations.at(_name);

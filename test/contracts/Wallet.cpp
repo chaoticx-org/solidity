@@ -38,7 +38,6 @@
 
 #include <test/libsolidity/SolidityExecutionFramework.h>
 
-using namespace std;
 using namespace solidity::test;
 using namespace solidity::util;
 
@@ -445,7 +444,7 @@ class WalletTestFramework: public SolidityExecutionFramework
 protected:
 	void deployWallet(
 		u256 const& _value = 0,
-		vector<h160> const& _owners = vector<h160>{},
+		std::vector<h160> const& _owners = std::vector<h160>{},
 		u256 _required = 1,
 		u256 _dailyLimit = 0
 	)
@@ -455,7 +454,7 @@ protected:
 		});
 
 		bytes args = encodeArgs(u256(0x60), _required, _dailyLimit, u256(_owners.size()), _owners);
-		sendMessage(compiled + args, true, _value);
+		sendMessage(compiled, args, true, _value);
 		BOOST_REQUIRE(m_transactionSuccessful);
 		BOOST_REQUIRE(!m_output.empty());
 	}
@@ -535,7 +534,7 @@ BOOST_AUTO_TEST_CASE(remove_owner)
 
 BOOST_AUTO_TEST_CASE(initial_owners)
 {
-	vector<h160> owners{
+	std::vector<h160> owners{
 		h160("0x42c56279432962a17176998a4747d1b4d6ed4367"),
 		h160("0xd4d4669f5ba9f4c27d38ef02a358c339b5560c47"),
 		h160("0xe6716f9544a56c530d868e4bfbacb172315bdead"),
@@ -591,7 +590,7 @@ BOOST_AUTO_TEST_CASE(revoke_addOwner)
 	BOOST_REQUIRE(callContractFunction("changeRequirement(uint256)", u256(3)) == encodeArgs());
 	// add a new owner
 	h160 deployer = m_sender;
-	h256 opHash = util::keccak256(FixedHash<4>(util::keccak256("addOwner(address)")).asBytes() + h256(0x33).asBytes());
+	h256 opHash = util::keccak256(util::selectorFromSignatureH32("addOwner(address)").asBytes() + h256(0x33).asBytes());
 	BOOST_REQUIRE(callContractFunction("addOwner(address)", h160(0x33)) == encodeArgs());
 	BOOST_REQUIRE(callContractFunction("isOwner(address)", h160(0x33)) == encodeArgs(false));
 	m_sender = account(0);

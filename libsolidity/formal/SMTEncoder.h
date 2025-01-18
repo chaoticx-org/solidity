@@ -54,8 +54,10 @@ class SMTEncoder: public ASTConstVisitor
 public:
 	SMTEncoder(
 		smt::EncodingContext& _context,
-		ModelCheckerSettings const& _settings,
+		ModelCheckerSettings _settings,
 		langutil::UniqueErrorReporter& _errorReporter,
+		langutil::UniqueErrorReporter& _unsupportedErrorReporter,
+		langutil::ErrorReporter& _provedSafeReporter,
 		langutil::CharStreamProvider const& _charStreamProvider
 	);
 
@@ -113,9 +115,6 @@ public:
 	/// @returns the ModifierDefinition of a ModifierInvocation if possible, or nullptr.
 	static ModifierDefinition const* resolveModifierInvocation(ModifierInvocation const& _invocation, ContractDefinition const* _contract);
 
-	/// @returns the SourceUnit that contains _scopable.
-	static SourceUnit const* sourceUnitContaining(Scopable const& _scopable);
-
 	/// @returns the arguments for each base constructor call in the hierarchy of @a _contract.
 	std::map<ContractDefinition const*, std::vector<ASTPointer<frontend::Expression>>> baseArguments(ContractDefinition const& _contract);
 
@@ -123,13 +122,27 @@ public:
 	/// RationalNumberType or can be const evaluated, and nullptr otherwise.
 	static RationalNumberType const* isConstant(Expression const& _expr);
 
-	static std::set<FunctionCall const*> collectABICalls(ASTNode const* _node);
+	static std::set<FunctionCall const*, ASTCompareByID<FunctionCall>> collectABICalls(ASTNode const* _node);
+	static std::set<FunctionCall const*, ASTCompareByID<FunctionCall>> collectBytesConcatCalls(ASTNode const* _node);
 
 	/// @returns all the sources that @param _source depends on,
 	/// including itself.
 	static std::set<SourceUnit const*, ASTNode::CompareByID> sourceDependencies(SourceUnit const& _source);
 
 protected:
+	struct TransientDataLocationChecker: ASTConstVisitor
+	{
+		TransientDataLocationChecker(ContractDefinition const& _contract) { _contract.accept(*this); }
+
+		void endVisit(VariableDeclaration const& _var)
+		{
+			solUnimplementedAssert(
+				_var.referenceLocation() != VariableDeclaration::Location::Transient,
+				"Transient storage variables are not supported."
+			);
+		}
+	};
+
 	void resetSourceAnalysis();
 
 	// TODO: Check that we do not have concurrent reads and writes to a variable,
@@ -170,7 +183,9 @@ protected:
 	void endVisit(IndexAccess const& _node) override;
 	void endVisit(IndexRangeAccess const& _node) override;
 	bool visit(InlineAssembly const& _node) override;
+	bool visit(Break const&) override { return false; }
 	void endVisit(Break const&) override {}
+	bool visit(Continue const&) override { return false; }
 	void endVisit(Continue const&) override {}
 	bool visit(TryCatchClause const&) override { return true; }
 	void endVisit(TryCatchClause const&) override {}
@@ -211,6 +226,7 @@ protected:
 	void visitAssert(FunctionCall const& _funCall);
 	void visitRequire(FunctionCall const& _funCall);
 	void visitABIFunction(FunctionCall const& _funCall);
+	void visitBytesConcat(FunctionCall const& _funCall);
 	void visitCryptoFunction(FunctionCall const& _funCall);
 	void visitGasLeft(FunctionCall const& _funCall);
 	virtual void visitAddMulMod(FunctionCall const& _funCall);
@@ -219,7 +235,7 @@ protected:
 	void visitTypeConversion(FunctionCall const& _funCall);
 	void visitStructConstructorCall(FunctionCall const& _funCall);
 	void visitFunctionIdentifier(Identifier const& _identifier);
-	void visitPublicGetter(FunctionCall const& _funCall);
+	virtual void visitPublicGetter(FunctionCall const& _funCall);
 
 	/// @returns true if @param _contract is set for analysis in the settings
 	/// and it is not abstract.
@@ -227,7 +243,12 @@ protected:
 	/// @returns true if @param _source is set for analysis in the settings.
 	bool shouldAnalyze(SourceUnit const& _source) const;
 
-	bool isPublicGetter(Expression const& _expr);
+	/// @returns the state variable returned by a public getter if
+	/// @a _expr is a call to a public getter,
+	/// otherwise nullptr.
+	VariableDeclaration const* publicGetter(Expression const& _expr) const;
+
+	smtutil::Expression contractAddressValue(FunctionCall const& _f);
 
 	/// Encodes a modifier or function body according to the modifier
 	/// visit depth.
@@ -270,7 +291,7 @@ protected:
 	/// @returns a pair of expressions representing _left / _right and _left mod _right, respectively.
 	/// Uses slack variables and additional constraints to express the results using only operations
 	/// more friendly to the SMT solver (multiplication, addition, subtraction and comparison).
-	std::pair<smtutil::Expression, smtutil::Expression>	divModWithSlacks(
+	std::pair<smtutil::Expression, smtutil::Expression> divModWithSlacks(
 		smtutil::Expression _left,
 		smtutil::Expression _right,
 		IntegerType const& _type
@@ -392,18 +413,22 @@ protected:
 	/// otherwise nullptr.
 	MemberAccess const* isEmptyPush(Expression const& _expr) const;
 
-	/// @returns true if the given identifier is a contract which is known and trusted.
+	/// @returns true if the given expression is `this`.
 	/// This means we don't have to abstract away effects of external function calls to this contract.
-	static bool isTrustedExternalCall(Expression const* _expr);
+	static bool isExternalCallToThis(Expression const* _expr);
 
 	/// Creates symbolic expressions for the returned values
 	/// and set them as the components of the symbolic tuple.
-	void createReturnedExpressions(FunctionCall const& _funCall, ContractDefinition const* _contextContract);
+	void createReturnedExpressions(FunctionDefinition const* _funDef, Expression const& _calledExpr);
 
 	/// @returns the symbolic arguments for a function call,
-	/// taking into account bound functions and
+	/// taking into account attached functions and
 	/// type conversion.
-	std::vector<smtutil::Expression> symbolicArguments(FunctionCall const& _funCall, ContractDefinition const* _contextContract);
+	std::vector<smtutil::Expression> symbolicArguments(
+		std::vector<ASTPointer<VariableDeclaration>> const& _funParameters,
+		std::vector<Expression const*> const& _arguments,
+		std::optional<Expression const*> _calledExpr
+	);
 
 	smtutil::Expression constantExpr(Expression const& _expr, VariableDeclaration const& _var);
 
@@ -438,6 +463,8 @@ protected:
 	bool m_checked = true;
 
 	langutil::UniqueErrorReporter& m_errorReporter;
+	langutil::UniqueErrorReporter& m_unsupportedErrors;
+	langutil::ErrorReporter& m_provedSafeReporter;
 
 	/// Stores the current function/modifier call/invocation path.
 	std::vector<CallStackEntry> m_callStack;
@@ -483,13 +510,21 @@ protected:
 	/// Stores the context of the encoding.
 	smt::EncodingContext& m_context;
 
-	ModelCheckerSettings const& m_settings;
+	ModelCheckerSettings m_settings;
 
 	/// Character stream for each source,
 	/// used for retrieving source text of expressions for e.g. counter-examples.
 	langutil::CharStreamProvider const& m_charStreamProvider;
 
 	smt::SymbolicState& state();
+
+private:
+	smtutil::Expression createSelectExpressionForFunction(
+		smtutil::Expression symbFunction,
+		std::vector<frontend::ASTPointer<frontend::Expression const>> const& args,
+		frontend::TypePointers const& inTypes,
+		unsigned long argsActualLength
+	);
 };
 
 }

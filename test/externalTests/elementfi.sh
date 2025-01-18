@@ -22,7 +22,7 @@
 set -e
 
 source scripts/common.sh
-source test/externalTests/common.sh
+source scripts/externalTests/common.sh
 
 REPO_ROOT=$(realpath "$(dirname "$0")/../..")
 
@@ -37,16 +37,15 @@ function test_fn { npm run test; }
 function elementfi_test
 {
     local repo="https://github.com/element-fi/elf-contracts"
-    local ref_type=branch
-    local ref=main
+    local ref="<latest-release>"
     local config_file="hardhat.config.ts"
     local config_var=config
 
     local compile_only_presets=(
         # ElementFi's test suite is hard-coded for Mainnet forked via alchemy.io.
         # Locally we can only compile.
-        #ir-no-optimize           # Compilation fails with "YulException: Variable var_amount_9311 is 10 slot(s) too deep inside the stack."
-        #ir-optimize-evm-only     # Compilation fails with "YulException: Variable var_amount_9311 is 10 slot(s) too deep inside the stack."
+        ir-no-optimize
+        ir-optimize-evm-only
         ir-optimize-evm+yul
         legacy-no-optimize
         legacy-optimize-evm-only
@@ -60,7 +59,7 @@ function elementfi_test
     print_presets_or_exit "$SELECTED_PRESETS"
 
     setup_solc "$DIR" "$BINARY_TYPE" "$BINARY_PATH"
-    download_project "$repo" "$ref_type" "$ref" "$DIR"
+    download_project "$repo" "$ref" "$DIR"
 
     chmod +x scripts/load-balancer-contracts.sh
     scripts/load-balancer-contracts.sh
@@ -87,13 +86,9 @@ function elementfi_test
     sed -i 's|bytes32(uint256(pool))|bytes32(uint256(uint160(pool)))|g' vault/PoolRegistry.sol
     popd
 
-    # The test suite uses forked Mainnet and an expiration period that's too short.
-    # TODO: Remove when https://github.com/element-fi/elf-contracts/issues/243 is fixed.
-    sed -i 's|^\s*require(_expiration - block\.timestamp < _unitSeconds);\s*$||g' contracts/ConvergentCurvePool.sol
-
     # Disable tests that won't pass on the ir presets due to Hardhat heuristics. Note that this also disables
     # them for other presets but that's fine - we want same code run for benchmarks to be comparable.
-    # TODO: Remove this when Hardhat adjusts heuristics for IR (https://github.com/nomiclabs/hardhat/issues/2115).
+    # TODO: Remove this when Hardhat adjusts heuristics for IR (https://github.com/nomiclabs/hardhat/issues/3365).
     sed -i 's|it(\("fails to withdraw more shares than in balance"\)|it.skip(\1|g' test/compoundAssetProxyTest.ts
     sed -i 's|it(\("should prevent withdrawal of Principal Tokens and Interest Tokens before the tranche expires "\)|it.skip(\1|g' test/trancheTest.ts
     sed -i 's|it(\("should prevent withdrawal of more Principal Tokens and Interest Tokens than the user has"\)|it.skip(\1|g' test/trancheTest.ts
@@ -104,9 +99,7 @@ function elementfi_test
     # "ProviderError: Too Many Requests error received from eth-mainnet.alchemyapi.io"
     rm test/mockERC20YearnVaultTest.ts
 
-    # Several tests fail unless we use the exact versions hard-coded in package-lock.json
-    #neutralize_package_lock
-
+    neutralize_package_lock
     neutralize_package_json_hooks
     force_hardhat_compiler_binary "$config_file" "$BINARY_TYPE" "$BINARY_PATH"
     force_hardhat_compiler_settings "$config_file" "$(first_word "$SELECTED_PRESETS")" "$config_var"

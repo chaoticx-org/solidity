@@ -52,5 +52,6 @@ contract C {
 }
 // ====
 // SMTEngine: all
+// SMTTargets: assert
 // ----
-// Warning 6368: (212-217): CHC: Out of bounds access might happen here.
+// Info 1391: CHC: 5 verification condition(s) proved safe! Enable the model checker option "show proved safe" to see all of them.

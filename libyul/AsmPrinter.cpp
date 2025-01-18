@@ -23,8 +23,9 @@
 
 #include <libyul/AsmPrinter.h>
 #include <libyul/AST.h>
-#include <libyul/Exceptions.h>
 #include <libyul/Dialect.h>
+#include <libyul/Exceptions.h>
+#include <libyul/Utilities.h>
 
 #include <libsolutil/CommonData.h>
 #include <libsolutil/StringUtils.h>
@@ -34,67 +35,81 @@
 
 #include <range/v3/view/transform.hpp>
 
-#include <memory>
 #include <functional>
+#include <memory>
 
-using namespace std;
 using namespace solidity;
 using namespace solidity::langutil;
 using namespace solidity::util;
 using namespace solidity::yul;
 
-string AsmPrinter::operator()(Literal const& _literal)
+std::string AsmPrinter::format(
+	AST const& _ast,
+	std::optional<std::map<unsigned, std::shared_ptr<std::string const>>> const& _sourceIndexToName,
+	DebugInfoSelection const& _debugInfoSelection,
+	CharStreamProvider const* _soliditySourceProvider)
 {
-	string const locationComment = formatDebugData(_literal);
+	return AsmPrinter{_ast.dialect(), _sourceIndexToName, _debugInfoSelection, _soliditySourceProvider}(_ast.root());
+}
+
+
+std::string AsmPrinter::operator()(Literal const& _literal)
+{
+	yulAssert(validLiteral(_literal));
+
+	std::string const locationComment = formatDebugData(_literal);
+	std::string const formattedValue = formatLiteral(_literal);
 
 	switch (_literal.kind)
 	{
 	case LiteralKind::Number:
-		yulAssert(isValidDecimal(_literal.value.str()) || isValidHex(_literal.value.str()), "Invalid number literal");
-		return locationComment + _literal.value.str() + appendTypeName(_literal.type);
 	case LiteralKind::Boolean:
-		yulAssert(_literal.value == "true"_yulstring || _literal.value == "false"_yulstring, "Invalid bool literal.");
-		return locationComment + ((_literal.value == "true"_yulstring) ? "true" : "false") + appendTypeName(_literal.type, true);
+		return locationComment + formattedValue;
 	case LiteralKind::String:
 		break;
 	}
 
-	return locationComment + escapeAndQuoteString(_literal.value.str()) + appendTypeName(_literal.type);
+	return locationComment + escapeAndQuoteString(formattedValue);
 }
 
-string AsmPrinter::operator()(Identifier const& _identifier)
+std::string AsmPrinter::operator()(Identifier const& _identifier)
 {
 	yulAssert(!_identifier.name.empty(), "Invalid identifier.");
 	return formatDebugData(_identifier) + _identifier.name.str();
 }
 
-string AsmPrinter::operator()(ExpressionStatement const& _statement)
+std::string AsmPrinter::operator()(BuiltinName const& _builtin)
 {
-	string const locationComment = formatDebugData(_statement);
+	return formatDebugData(_builtin) + m_dialect.builtin(_builtin.handle).name;
+}
+
+std::string AsmPrinter::operator()(ExpressionStatement const& _statement)
+{
+	std::string const locationComment = formatDebugData(_statement);
 
 	return locationComment + std::visit(*this, _statement.expression);
 }
 
-string AsmPrinter::operator()(Assignment const& _assignment)
+std::string AsmPrinter::operator()(Assignment const& _assignment)
 {
-	string const locationComment = formatDebugData(_assignment);
+	std::string const locationComment = formatDebugData(_assignment);
 
 	yulAssert(_assignment.variableNames.size() >= 1, "");
-	string variables = (*this)(_assignment.variableNames.front());
+	std::string variables = (*this)(_assignment.variableNames.front());
 	for (size_t i = 1; i < _assignment.variableNames.size(); ++i)
 		variables += ", " + (*this)(_assignment.variableNames[i]);
 
 	return locationComment + variables + " := " + std::visit(*this, *_assignment.value);
 }
 
-string AsmPrinter::operator()(VariableDeclaration const& _variableDeclaration)
+std::string AsmPrinter::operator()(VariableDeclaration const& _variableDeclaration)
 {
-	string out = formatDebugData(_variableDeclaration);
+	std::string out = formatDebugData(_variableDeclaration);
 
 	out += "let ";
 	out += boost::algorithm::join(
 		_variableDeclaration.variables | ranges::views::transform(
-			[this](TypedName argument) { return formatTypedName(argument); }
+			[this](NameWithDebugData argument) { return formatNameWithDebugData(argument); }
 		),
 		", "
 	);
@@ -106,15 +121,15 @@ string AsmPrinter::operator()(VariableDeclaration const& _variableDeclaration)
 	return out;
 }
 
-string AsmPrinter::operator()(FunctionDefinition const& _functionDefinition)
+std::string AsmPrinter::operator()(FunctionDefinition const& _functionDefinition)
 {
 	yulAssert(!_functionDefinition.name.empty(), "Invalid function name.");
 
-	string out = formatDebugData(_functionDefinition);
+	std::string out = formatDebugData(_functionDefinition);
 	out += "function " + _functionDefinition.name.str() + "(";
 	out += boost::algorithm::join(
 		_functionDefinition.parameters | ranges::views::transform(
-			[this](TypedName argument) { return formatTypedName(argument); }
+			[this](NameWithDebugData argument) { return formatNameWithDebugData(argument); }
 		),
 		", "
 	);
@@ -124,7 +139,7 @@ string AsmPrinter::operator()(FunctionDefinition const& _functionDefinition)
 		out += " -> ";
 		out += boost::algorithm::join(
 			_functionDefinition.returnVariables | ranges::views::transform(
-				[this](TypedName argument) { return formatTypedName(argument); }
+				[this](NameWithDebugData argument) { return formatNameWithDebugData(argument); }
 			),
 			", "
 		);
@@ -133,10 +148,10 @@ string AsmPrinter::operator()(FunctionDefinition const& _functionDefinition)
 	return out + "\n" + (*this)(_functionDefinition.body);
 }
 
-string AsmPrinter::operator()(FunctionCall const& _functionCall)
+std::string AsmPrinter::operator()(FunctionCall const& _functionCall)
 {
-	string const locationComment = formatDebugData(_functionCall);
-	string const functionName = (*this)(_functionCall.functionName);
+	std::string const locationComment = formatDebugData(_functionCall);
+	std::string const functionName = std::visit(*this, _functionCall.functionName);
 	return
 		locationComment +
 		functionName + "(" +
@@ -146,26 +161,26 @@ string AsmPrinter::operator()(FunctionCall const& _functionCall)
 		")";
 }
 
-string AsmPrinter::operator()(If const& _if)
+std::string AsmPrinter::operator()(If const& _if)
 {
 	yulAssert(_if.condition, "Invalid if condition.");
 
-	string out = formatDebugData(_if);
+	std::string out = formatDebugData(_if);
 	out += "if " + std::visit(*this, *_if.condition);
 
-	string body = (*this)(_if.body);
+	std::string body = (*this)(_if.body);
 	char delim = '\n';
-	if (body.find('\n') == string::npos)
+	if (body.find('\n') == std::string::npos)
 		delim = ' ';
 
 	return out + delim + body;
 }
 
-string AsmPrinter::operator()(Switch const& _switch)
+std::string AsmPrinter::operator()(Switch const& _switch)
 {
 	yulAssert(_switch.expression, "Invalid expression pointer.");
 
-	string out = formatDebugData(_switch);
+	std::string out = formatDebugData(_switch);
 	out += "switch " + std::visit(*this, *_switch.expression);
 
 	for (auto const& _case: _switch.cases)
@@ -179,55 +194,55 @@ string AsmPrinter::operator()(Switch const& _switch)
 	return out;
 }
 
-string AsmPrinter::operator()(ForLoop const& _forLoop)
+std::string AsmPrinter::operator()(ForLoop const& _forLoop)
 {
 	yulAssert(_forLoop.condition, "Invalid for loop condition.");
-	string const locationComment = formatDebugData(_forLoop);
+	std::string const locationComment = formatDebugData(_forLoop);
 
-	string pre = (*this)(_forLoop.pre);
-	string condition = std::visit(*this, *_forLoop.condition);
-	string post = (*this)(_forLoop.post);
+	std::string pre = (*this)(_forLoop.pre);
+	std::string condition = std::visit(*this, *_forLoop.condition);
+	std::string post = (*this)(_forLoop.post);
 
 	char delim = '\n';
 	if (
 		pre.size() + condition.size() + post.size() < 60 &&
-		pre.find('\n') == string::npos &&
-		post.find('\n') == string::npos
+		pre.find('\n') == std::string::npos &&
+		post.find('\n') == std::string::npos
 	)
 		delim = ' ';
 	return
 		locationComment +
-		("for " + move(pre) + delim + move(condition) + delim + move(post) + "\n") +
+		("for " + std::move(pre) + delim + std::move(condition) + delim + std::move(post) + "\n") +
 		(*this)(_forLoop.body);
 }
 
-string AsmPrinter::operator()(Break const& _break)
+std::string AsmPrinter::operator()(Break const& _break)
 {
 	return formatDebugData(_break) + "break";
 }
 
-string AsmPrinter::operator()(Continue const& _continue)
+std::string AsmPrinter::operator()(Continue const& _continue)
 {
 	return formatDebugData(_continue) + "continue";
 }
 
 // '_leave' and '__leave' is reserved in VisualStudio
-string AsmPrinter::operator()(Leave const& leave_)
+std::string AsmPrinter::operator()(Leave const& leave_)
 {
 	return formatDebugData(leave_) + "leave";
 }
 
-string AsmPrinter::operator()(Block const& _block)
+std::string AsmPrinter::operator()(Block const& _block)
 {
-	string const locationComment = formatDebugData(_block);
+	std::string const locationComment = formatDebugData(_block);
 
 	if (_block.statements.empty())
 		return locationComment + "{ }";
-	string body = boost::algorithm::join(
+	std::string body = boost::algorithm::join(
 		_block.statements | ranges::views::transform([&](auto&& _node) { return std::visit(*this, _node); }),
 		"\n"
 	);
-	if (body.size() < 30 && body.find('\n') == string::npos)
+	if (body.size() < 30 && body.find('\n') == std::string::npos)
 		return locationComment + "{ " + body + " }";
 	else
 	{
@@ -236,31 +251,15 @@ string AsmPrinter::operator()(Block const& _block)
 	}
 }
 
-string AsmPrinter::formatTypedName(TypedName _variable)
+std::string AsmPrinter::formatNameWithDebugData(NameWithDebugData _variable)
 {
 	yulAssert(!_variable.name.empty(), "Invalid variable name.");
-	return formatDebugData(_variable) + _variable.name.str() + appendTypeName(_variable.type);
+	return formatDebugData(_variable) + _variable.name.str();
 }
 
-string AsmPrinter::appendTypeName(YulString _type, bool _isBoolLiteral) const
-{
-	if (m_dialect && !_type.empty())
-	{
-		if (!_isBoolLiteral && _type == m_dialect->defaultType)
-			_type = {};
-		else if (_isBoolLiteral && _type == m_dialect->boolType && !m_dialect->defaultType.empty())
-			// Special case: If we have a bool type but empty default type, do not remove the type.
-			_type = {};
-	}
-	if (_type.empty())
-		return {};
-	else
-		return ":" + _type.str();
-}
-
-string AsmPrinter::formatSourceLocation(
+std::string AsmPrinter::formatSourceLocation(
 	SourceLocation const& _location,
-	map<string, unsigned> const& _nameToSourceIndex,
+	std::map<std::string, unsigned> const& _nameToSourceIndex,
 	DebugInfoSelection const& _debugInfoSelection,
 	CharStreamProvider const* _soliditySourceProvider
 )
@@ -272,11 +271,11 @@ string AsmPrinter::formatSourceLocation(
 	if (_debugInfoSelection.none())
 		return "";
 
-	string sourceIndex = "-1";
-	string solidityCodeSnippet = "";
+	std::string sourceIndex = "-1";
+	std::string solidityCodeSnippet = "";
 	if (_location.sourceName)
 	{
-		sourceIndex = to_string(_nameToSourceIndex.at(*_location.sourceName));
+		sourceIndex = std::to_string(_nameToSourceIndex.at(*_location.sourceName));
 
 		if (
 			_debugInfoSelection.snippet &&
@@ -295,26 +294,26 @@ string AsmPrinter::formatSourceLocation(
 		}
 	}
 
-	string sourceLocation =
+	std::string sourceLocation =
 		"@src " +
 		sourceIndex +
 		":" +
-		to_string(_location.start) +
+		std::to_string(_location.start) +
 		":" +
-		to_string(_location.end);
+		std::to_string(_location.end);
 
 	return sourceLocation + (solidityCodeSnippet.empty() ? "" : "  ") + solidityCodeSnippet;
 }
 
-string AsmPrinter::formatDebugData(shared_ptr<DebugData const> const& _debugData, bool _statement)
+std::string AsmPrinter::formatDebugData(langutil::DebugData::ConstPtr const& _debugData, bool _statement)
 {
 	if (!_debugData || m_debugInfoSelection.none())
 		return "";
 
-	vector<string> items;
+	std::vector<std::string> items;
 	if (auto id = _debugData->astID)
 		if (m_debugInfoSelection.astID)
-			items.emplace_back("@ast-id " + to_string(*id));
+			items.emplace_back("@ast-id " + std::to_string(*id));
 
 	if (
 		m_lastLocation != _debugData->originLocation &&
@@ -331,7 +330,7 @@ string AsmPrinter::formatDebugData(shared_ptr<DebugData const> const& _debugData
 		));
 	}
 
-	string commentBody = joinHumanReadable(items, " ");
+	std::string commentBody = joinHumanReadable(items, " ");
 	if (commentBody.empty())
 		return "";
 	else

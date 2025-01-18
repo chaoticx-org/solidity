@@ -11,14 +11,16 @@ contract C {
     }
 }
 // ====
+// EVMVersion: =current
 // optimize: true
 // optimize-yul: true
+// bytecodeFormat: legacy
 // ----
 // creation:
-//   codeDepositCost: 27200
-//   executionCost: 81
-//   totalCost: 27281
+//   codeDepositCost: 25600
+//   executionCost: 73
+//   totalCost: 25673
 // external:
-//   readX(): 2290
-//   resetX(): 5116
-//   setX(uint256): 22312
+//   readX(): 2288
+//   resetX(): 5114
+//   setX(uint256): 22309

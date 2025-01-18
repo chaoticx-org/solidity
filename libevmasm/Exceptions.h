@@ -28,11 +28,9 @@ namespace solidity::evmasm
 {
 
 struct AssemblyException: virtual util::Exception {};
+struct AssemblyImportException: virtual AssemblyException {};
 struct OptimizerException: virtual AssemblyException {};
 struct StackTooDeepException: virtual OptimizerException {};
 struct ItemNotAvailableException: virtual OptimizerException {};
-
-DEV_SIMPLE_EXCEPTION(InvalidDeposit);
-DEV_SIMPLE_EXCEPTION(InvalidOpcode);
 
 }

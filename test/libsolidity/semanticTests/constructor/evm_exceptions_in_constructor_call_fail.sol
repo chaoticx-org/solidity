@@ -13,7 +13,8 @@ contract B {
         ++test;
     }
 }
-
+// ====
+// bytecodeFormat: legacy,>=EOFv1
 // ----
 // testIt() ->
 // test() -> 2

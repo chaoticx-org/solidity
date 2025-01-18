@@ -27,7 +27,7 @@
 
 namespace solidity::yul
 {
-struct Dialect;
+class Dialect;
 struct OptimiserStepContext;
 
 /**
@@ -54,6 +54,7 @@ private:
 	explicit ExpressionSimplifier(Dialect const& _dialect):
 		DataFlowAnalyzer(_dialect, MemoryAndStorage::Ignore)
 	{}
+	bool knownToBeZero(Expression const& _expression) const;
 };
 
 }

@@ -26,24 +26,23 @@
 #include <libyul/optimiser/NameCollector.h>
 #include <libyul/optimiser/NameDisplacer.h>
 #include <libyul/optimiser/NameDispenser.h>
-#include <libyul/YulString.h>
+#include <libyul/YulName.h>
 #include <libyul/AST.h>
 
 #include <libsolutil/CommonData.h>
 
-#include <boost/algorithm/cxx11/all_of.hpp>
+#include <range/v3/algorithm/all_of.hpp>
 
 #include <optional>
 #include <variant>
 
-using namespace std;
 using namespace solidity::util;
 using namespace solidity::yul;
 using namespace solidity::yul::unusedFunctionsCommon;
 
 void UnusedFunctionParameterPruner::run(OptimiserStepContext& _context, Block& _ast)
 {
-	map<YulString, size_t> references = ReferencesCounter::countReferences(_ast);
+	std::map<YulName, size_t> references = VariableReferencesCounter::countReferences(_ast);
 	auto used = [&](auto v) -> bool { return references.count(v.name); };
 
 	// Function name and a pair of boolean masks, the first corresponds to parameters and the second
@@ -55,16 +54,16 @@ void UnusedFunctionParameterPruner::run(OptimiserStepContext& _context, Block& _
 	// Similarly for the second vector in the pair, a value `false` at index `i` indicates that the
 	// return parameter at index `i` in `FunctionDefinition::returnVariables` is unused inside
 	// function body.
-	map<YulString, pair<vector<bool>, vector<bool>>> usedParametersAndReturnVariables;
+	std::map<YulName, std::pair<std::vector<bool>, std::vector<bool>>> usedParametersAndReturnVariables;
 
 	// Step 1 of UnusedFunctionParameterPruner: Find functions whose parameters (both arguments and
 	// return-parameters) are not used in its body.
 	for (auto const& statement: _ast.statements)
-		if (holds_alternative<FunctionDefinition>(statement))
+		if (std::holds_alternative<FunctionDefinition>(statement))
 		{
 			FunctionDefinition const& f = std::get<FunctionDefinition>(statement);
 
-			if (tooSimpleToBePruned(f) || boost::algorithm::all_of(f.parameters + f.returnVariables, used))
+			if (tooSimpleToBePruned(f) || ranges::all_of(f.parameters + f.returnVariables, used))
 				continue;
 
 			usedParametersAndReturnVariables[f.name] = {
@@ -73,7 +72,7 @@ void UnusedFunctionParameterPruner::run(OptimiserStepContext& _context, Block& _
 			};
 		}
 
-	set<YulString> functionNamesToFree = util::keys(usedParametersAndReturnVariables);
+	std::set<YulName> functionNamesToFree = util::keys(usedParametersAndReturnVariables);
 
 	// Step 2 of UnusedFunctionParameterPruner: Renames the function and replaces all references to
 	// the function, say `f`, by its new name, say `f_1`.
@@ -82,7 +81,7 @@ void UnusedFunctionParameterPruner::run(OptimiserStepContext& _context, Block& _
 
 	// Inverse-Map of the above translations. In the above example, this will store an element with
 	// key `f_1` and value `f`.
-	std::map<YulString, YulString> newToOriginalNames = invertMap(replace.translations());
+	std::map<YulName, YulName> newToOriginalNames = invertMap(replace.translations());
 
 	// Step 3 of UnusedFunctionParameterPruner: introduce a new function in the block with body of
 	// the old one. Replace the body of the old one with a function call to the new one with reduced
@@ -91,17 +90,17 @@ void UnusedFunctionParameterPruner::run(OptimiserStepContext& _context, Block& _
 	// For example: introduce a new 'linking' function `f` with the same the body as `f_1`, but with
 	// reduced parameters, i.e., `function f() -> y { y := 1 }`. Now replace the body of `f_1` with
 	// a call to `f`, i.e., `f_1(x) -> y { y := f() }`.
-	iterateReplacing(_ast.statements, [&](Statement& _s) -> optional<vector<Statement>> {
-		if (holds_alternative<FunctionDefinition>(_s))
+	iterateReplacing(_ast.statements, [&](Statement& _s) -> std::optional<std::vector<Statement>> {
+		if (std::holds_alternative<FunctionDefinition>(_s))
 		{
 			// The original function except that it has a new name (e.g., `f_1`)
-			FunctionDefinition& originalFunction = get<FunctionDefinition>(_s);
+			FunctionDefinition& originalFunction = std::get<FunctionDefinition>(_s);
 			if (newToOriginalNames.count(originalFunction.name))
 			{
 
-				YulString linkingFunctionName = originalFunction.name;
-				YulString originalFunctionName = newToOriginalNames.at(linkingFunctionName);
-				pair<vector<bool>, vector<bool>> used =
+				YulName linkingFunctionName = originalFunction.name;
+				YulName originalFunctionName = newToOriginalNames.at(linkingFunctionName);
+				std::pair<std::vector<bool>, std::vector<bool>> used =
 					usedParametersAndReturnVariables.at(originalFunctionName);
 
 				FunctionDefinition linkingFunction = createLinkingFunction(
@@ -118,10 +117,10 @@ void UnusedFunctionParameterPruner::run(OptimiserStepContext& _context, Block& _
 				originalFunction.returnVariables =
 					filter(originalFunction.returnVariables, used.second);
 
-				return make_vector<Statement>(move(originalFunction), move(linkingFunction));
+				return make_vector<Statement>(std::move(originalFunction), std::move(linkingFunction));
 			}
 		}
 
-		return nullopt;
+		return std::nullopt;
 	});
 }

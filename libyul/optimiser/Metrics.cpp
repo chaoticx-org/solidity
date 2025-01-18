@@ -20,6 +20,7 @@
 
 #include <libyul/optimiser/Metrics.h>
 #include <libyul/optimiser/OptimizerUtilities.h>
+#include <libyul/backends/evm/EVMDialect.h>
 
 #include <libyul/AST.h>
 #include <libyul/Exceptions.h>
@@ -29,34 +30,33 @@
 
 #include <libsolutil/CommonData.h>
 
-using namespace std;
 using namespace solidity;
 using namespace solidity::yul;
 using namespace solidity::util;
 
 size_t CodeWeights::costOf(Statement const& _statement) const
 {
-	if (holds_alternative<ExpressionStatement>(_statement))
+	if (std::holds_alternative<ExpressionStatement>(_statement))
 		return expressionStatementCost;
-	else if (holds_alternative<Assignment>(_statement))
+	else if (std::holds_alternative<Assignment>(_statement))
 		return assignmentCost;
-	else if (holds_alternative<VariableDeclaration>(_statement))
+	else if (std::holds_alternative<VariableDeclaration>(_statement))
 		return variableDeclarationCost;
-	else if (holds_alternative<FunctionDefinition>(_statement))
+	else if (std::holds_alternative<FunctionDefinition>(_statement))
 		return functionDefinitionCost;
-	else if (holds_alternative<If>(_statement))
+	else if (std::holds_alternative<If>(_statement))
 		return ifCost;
-	else if (holds_alternative<Switch>(_statement))
+	else if (std::holds_alternative<Switch>(_statement))
 		return switchCost + caseCost * std::get<Switch>(_statement).cases.size();
-	else if (holds_alternative<ForLoop>(_statement))
+	else if (std::holds_alternative<ForLoop>(_statement))
 		return forLoopCost;
-	else if (holds_alternative<Break>(_statement))
+	else if (std::holds_alternative<Break>(_statement))
 		return breakCost;
-	else if (holds_alternative<Continue>(_statement))
+	else if (std::holds_alternative<Continue>(_statement))
 		return continueCost;
-	else if (holds_alternative<Leave>(_statement))
+	else if (std::holds_alternative<Leave>(_statement))
 		return leaveCost;
-	else if (holds_alternative<Block>(_statement))
+	else if (std::holds_alternative<Block>(_statement))
 		return blockCost;
 	else
 		yulAssert(false, "If you add a new statement type, you must update CodeWeights.");
@@ -64,14 +64,14 @@ size_t CodeWeights::costOf(Statement const& _statement) const
 
 size_t CodeWeights::costOf(Expression const& _expression) const
 {
-	if (holds_alternative<FunctionCall>(_expression))
+	if (std::holds_alternative<FunctionCall>(_expression))
 		return functionCallCost;
-	else if (holds_alternative<Identifier>(_expression))
+	else if (std::holds_alternative<Identifier>(_expression))
 		return identifierCost;
-	else if (Literal const* literal = get_if<Literal>(&_expression))
+	else if (Literal const* literal = std::get_if<Literal>(&_expression))
 	{
 		// Avoid strings because they could be longer than 32 bytes.
-		if (literal->kind != LiteralKind::String && valueOfLiteral(*literal) == 0)
+		if (literal->kind != LiteralKind::String && literal->value.value() == 0)
 			return literalZeroCost;
 		else
 			return literalCost;
@@ -111,7 +111,7 @@ size_t CodeSize::codeSizeIncludingFunctions(Block const& _block, CodeWeights con
 
 void CodeSize::visit(Statement const& _statement)
 {
-	if (holds_alternative<FunctionDefinition>(_statement) && m_ignoreFunctions)
+	if (std::holds_alternative<FunctionDefinition>(_statement) && m_ignoreFunctions)
 		return;
 
 	m_size += m_weights.costOf(_statement);
@@ -137,7 +137,7 @@ void CodeCost::operator()(FunctionCall const& _funCall)
 {
 	ASTWalker::operator()(_funCall);
 
-	if (auto instruction = toEVMInstruction(m_dialect, _funCall.functionName.name))
+	if (auto instruction = toEVMInstruction(m_dialect, _funCall.functionName))
 	{
 		addInstructionCost(*instruction);
 		return;
@@ -155,11 +155,15 @@ void CodeCost::operator()(Literal const& _literal)
 	case LiteralKind::Boolean:
 		break;
 	case LiteralKind::Number:
-		for (u256 n = u256(_literal.value.str()); n >= 0x100; n >>= 8)
+		for (u256 n = _literal.value.value(); n >= 0x100; n >>= 8)
 			cost++;
+		if (_literal.value.value() == 0)
+			if (auto evmDialect = dynamic_cast<EVMDialect const*>(&m_dialect))
+				if (evmDialect->evmVersion().hasPush0())
+					--m_cost;
 		break;
 	case LiteralKind::String:
-		cost = _literal.value.str().size();
+		cost = formatLiteral(_literal).size();
 		break;
 	}
 
@@ -180,7 +184,7 @@ void CodeCost::visit(Expression const& _expression)
 
 void CodeCost::addInstructionCost(evmasm::Instruction _instruction)
 {
-	evmasm::Tier gasPriceTier = evmasm::instructionInfo(_instruction).gasPriceTier;
+	evmasm::Tier gasPriceTier = evmasm::instructionInfo(_instruction, evmVersionFromDialect(m_dialect)).gasPriceTier;
 	if (gasPriceTier < evmasm::Tier::VeryLow)
 		m_cost -= 1;
 	else if (gasPriceTier < evmasm::Tier::High)
@@ -195,7 +199,7 @@ void AssignmentCounter::operator()(Assignment const& _assignment)
 		++m_assignmentCounters[variable.name];
 }
 
-size_t AssignmentCounter::assignmentCount(YulString _name) const
+size_t AssignmentCounter::assignmentCount(YulName _name) const
 {
 	auto it = m_assignmentCounters.find(_name);
 	return (it == m_assignmentCounters.end()) ? 0 : it->second;

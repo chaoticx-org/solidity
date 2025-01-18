@@ -9,9 +9,8 @@ contract c {
         y = data2[8];
     }
 }
-
 // ----
 // test() -> 9, 4
-// gas irOptimized: 123143
-// gas legacy: 123579
-// gas legacyOptimized: 123208
+// gas irOptimized: 123180
+// gas legacy: 123566
+// gas legacyOptimized: 123202

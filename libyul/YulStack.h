@@ -16,8 +16,7 @@
 */
 // SPDX-License-Identifier: GPL-3.0
 /**
- * Full assembly stack that can support EVM-assembly and Yul as input and EVM, EVM1.5 and
- * Ewasm as output.
+ * Full assembly stack that can support Yul as input.
  */
 
 #pragma once
@@ -26,8 +25,12 @@
 #include <liblangutil/DebugInfoSelection.h>
 #include <liblangutil/ErrorReporter.h>
 #include <liblangutil/EVMVersion.h>
+#include <liblangutil/Exceptions.h>
+
+#include <libsolutil/JSON.h>
 
 #include <libyul/Object.h>
+#include <libyul/ObjectOptimizer.h>
 #include <libyul/ObjectParser.h>
 
 #include <libsolidity/interface/OptimiserSettings.h>
@@ -55,23 +58,28 @@ class AbstractAssembly;
 struct MachineAssemblyObject
 {
 	std::shared_ptr<evmasm::LinkerObject> bytecode;
-	std::string assembly;
+	std::shared_ptr<evmasm::Assembly> assembly;
 	std::unique_ptr<std::string> sourceMappings;
 };
 
 /*
- * Full assembly stack that can support EVM-assembly and Yul as input and EVM, EVM1.5 and
- * Ewasm as output.
+ * Full assembly stack that can support EVM-assembly and Yul as input and EVM as output.
  */
 class YulStack: public langutil::CharStreamProvider
 {
 public:
-	enum class Language { Yul, Assembly, StrictAssembly, Ewasm };
-	enum class Machine { EVM, Ewasm };
+	using Language = yul::Language;
+	enum class Machine { EVM };
+	enum State {
+		Empty,
+		Parsed,
+		AnalysisSuccessful
+	};
 
 	YulStack():
 		YulStack(
 			langutil::EVMVersion{},
+			std::nullopt,
 			Language::Assembly,
 			solidity::frontend::OptimiserSettings::none(),
 			langutil::DebugInfoSelection::Default()
@@ -80,15 +88,21 @@ public:
 
 	YulStack(
 		langutil::EVMVersion _evmVersion,
+		std::optional<uint8_t> _eofVersion,
 		Language _language,
 		solidity::frontend::OptimiserSettings _optimiserSettings,
-		langutil::DebugInfoSelection const& _debugInfoSelection
+		langutil::DebugInfoSelection const& _debugInfoSelection,
+		langutil::CharStreamProvider const* _soliditySourceProvider = nullptr,
+		std::shared_ptr<ObjectOptimizer> _objectOptimizer = nullptr
 	):
 		m_language(_language),
 		m_evmVersion(_evmVersion),
+		m_eofVersion(_eofVersion),
 		m_optimiserSettings(std::move(_optimiserSettings)),
 		m_debugInfoSelection(_debugInfoSelection),
-		m_errorReporter(m_errors)
+		m_soliditySourceProvider(_soliditySourceProvider),
+		m_errorReporter(m_errors),
+		m_objectOptimizer(_objectOptimizer ? std::move(_objectOptimizer) : std::make_shared<ObjectOptimizer>())
 	{}
 
 	/// @returns the char stream used during parsing
@@ -102,11 +116,8 @@ public:
 	/// If the settings (see constructor) disabled the optimizer, nothing is done here.
 	void optimize();
 
-	/// Translate the source to a different language / dialect.
-	void translate(Language _targetLanguage);
-
 	/// Run the assembly step (should only be called after parseAndAnalyze).
-	MachineAssemblyObject assemble(Machine _machine) const;
+	MachineAssemblyObject assemble(Machine _machine);
 
 	/// Run the assembly step (should only be called after parseAndAnalyze).
 	/// In addition to the value returned by @a assemble, returns
@@ -115,7 +126,7 @@ public:
 	std::pair<MachineAssemblyObject, MachineAssemblyObject>
 	assembleWithDeployed(
 		std::optional<std::string_view> _deployName = {}
-	) const;
+	);
 
 	/// Run the assembly step (should only be called after parseAndAnalyze).
 	/// Similar to @a assemblyWithDeployed, but returns EVM assembly objects.
@@ -123,40 +134,62 @@ public:
 	std::pair<std::shared_ptr<evmasm::Assembly>, std::shared_ptr<evmasm::Assembly>>
 	assembleEVMWithDeployed(
 		std::optional<std::string_view> _deployName = {}
-	) const;
+	);
 
 	/// @returns the errors generated during parsing, analysis (and potentially assembly).
 	langutil::ErrorList const& errors() const { return m_errors; }
+	bool hasErrors() const { return m_errorReporter.hasErrors(); }
+	bool hasErrorsWarningsOrInfos() const { return m_errorReporter.hasErrorsWarningsOrInfos(); }
 
 	/// Pretty-print the input after having parsed it.
-	std::string print(
-		langutil::CharStreamProvider const* _soliditySourceProvider = nullptr
-	) const;
+	std::string print() const;
+	Json astJson() const;
+
+	// return the JSON representation of the YuL CFG (experimental)
+	Json cfgJson() const;
 
 	/// Return the parsed and analyzed object.
 	std::shared_ptr<Object> parserResult() const;
 
+	Dialect const& dialect() const;
+
+	langutil::DebugInfoSelection debugInfoSelection() const { return m_debugInfoSelection; }
+
 private:
+	bool parse(std::string const& _sourceName, std::string const& _source);
 	bool analyzeParsed();
 	bool analyzeParsed(yul::Object& _object);
 
 	void compileEVM(yul::AbstractAssembly& _assembly, bool _optimize) const;
 
-	void optimize(yul::Object& _object, bool _isCreation);
+	/// Prints the Yul object stored internally and parses it again.
+	/// This ensures that the debug info in the AST matches the source that printing would produce
+	/// rather than the initial source.
+	/// @warning Does not update the error list or the original source (@a m_charStream) to make
+	/// it possible to report errors to the user even after the optimization has been performed.
+	void reparse();
+
+	void reportUnimplementedFeatureError(langutil::UnimplementedFeatureError const& _error);
 
 	Language m_language = Language::Assembly;
 	langutil::EVMVersion m_evmVersion;
+	std::optional<uint8_t> m_eofVersion;
 	solidity::frontend::OptimiserSettings m_optimiserSettings;
 	langutil::DebugInfoSelection m_debugInfoSelection{};
 
+	/// Provider of the Solidity sources that the Yul code was generated from.
+	/// Necessary when code snippets are requested as a part of debug info. When null, code snippets are omitted.
+	/// NOTE: Not owned by YulStack, the user must ensure that it is not destroyed before the stack is.
+	langutil::CharStreamProvider const* m_soliditySourceProvider{};
+
 	std::unique_ptr<langutil::CharStream> m_charStream;
 
-	bool m_analysisSuccessful = false;
+	State m_stackState = Empty;
 	std::shared_ptr<yul::Object> m_parserResult;
 	langutil::ErrorList m_errors;
 	langutil::ErrorReporter m_errorReporter;
 
-	std::unique_ptr<std::string> m_sourceMappings;
+	std::shared_ptr<ObjectOptimizer> m_objectOptimizer;
 };
 
 }

@@ -17,14 +17,15 @@
 // SPDX-License-Identifier: GPL-3.0
 
 #include <libsolutil/Exceptions.h>
+#include <liblangutil/Exceptions.h>
 
-using namespace std;
 using namespace solidity::util;
+using namespace solidity::langutil;
 
 char const* Exception::what() const noexcept
 {
 	// Return the comment if available.
-	if (string const* cmt = comment())
+	if (std::string const* cmt = comment())
 		return cmt->data();
 
 	// Fallback to base what().
@@ -33,20 +34,28 @@ char const* Exception::what() const noexcept
 	return std::exception::what();
 }
 
-string Exception::lineInfo() const
+std::string Exception::lineInfo() const
 {
 	char const* const* file = boost::get_error_info<boost::throw_file>(*this);
 	int const* line = boost::get_error_info<boost::throw_line>(*this);
-	string ret;
+	std::string ret;
 	if (file)
 		ret += *file;
 	ret += ':';
 	if (line)
-		ret += to_string(*line);
+		ret += std::to_string(*line);
 	return ret;
 }
 
-string const* Exception::comment() const noexcept
+std::string const* Exception::comment() const noexcept
 {
 	return boost::get_error_info<errinfo_comment>(*this);
+}
+
+SourceLocation Exception::sourceLocation() const noexcept
+{
+	if (SourceLocation const* sourceLocation = boost::get_error_info<errinfo_sourceLocation>(*this))
+		return *sourceLocation;
+
+	return SourceLocation{};
 }

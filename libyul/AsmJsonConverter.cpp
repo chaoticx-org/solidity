@@ -21,42 +21,43 @@
  */
 
 #include <libyul/AsmJsonConverter.h>
+
 #include <libyul/AST.h>
+#include <libyul/Dialect.h>
 #include <libyul/Exceptions.h>
+#include <libyul/Utilities.h>
 #include <libsolutil/CommonData.h>
 #include <libsolutil/UTF8.h>
-
-using namespace std;
 
 namespace solidity::yul
 {
 
-Json::Value AsmJsonConverter::operator()(Block const& _node) const
+Json AsmJsonConverter::operator()(Block const& _node) const
 {
-	Json::Value ret = createAstNode(nativeLocationOf(_node), "YulBlock");
+	Json ret = createAstNode(originLocationOf(_node), nativeLocationOf(_node), "YulBlock");
 	ret["statements"] = vectorOfVariantsToJson(_node.statements);
 	return ret;
 }
 
-Json::Value AsmJsonConverter::operator()(TypedName const& _node) const
+Json AsmJsonConverter::operator()(NameWithDebugData const& _node) const
 {
 	yulAssert(!_node.name.empty(), "Invalid variable name.");
-	Json::Value ret = createAstNode(nativeLocationOf(_node), "YulTypedName");
+	Json ret = createAstNode(originLocationOf(_node), nativeLocationOf(_node), "YulTypedName");
 	ret["name"] = _node.name.str();
-	ret["type"] = _node.type.str();
+	// even though types are removed from Yul, we keep this field in the Json interface to not introduce
+	// a breaking change
+	// can be removed with the next breaking version
+	ret["type"] = "";
 	return ret;
 }
 
-Json::Value AsmJsonConverter::operator()(Literal const& _node) const
+Json AsmJsonConverter::operator()(Literal const& _node) const
 {
-	Json::Value ret = createAstNode(nativeLocationOf(_node), "YulLiteral");
+	yulAssert(validLiteral(_node));
+	Json ret = createAstNode(originLocationOf(_node), nativeLocationOf(_node), "YulLiteral");
 	switch (_node.kind)
 	{
 	case LiteralKind::Number:
-		yulAssert(
-			util::isValidDecimal(_node.value.str()) || util::isValidHex(_node.value.str()),
-			"Invalid number literal"
-		);
 		ret["kind"] = "number";
 		break;
 	case LiteralKind::Boolean:
@@ -64,103 +65,112 @@ Json::Value AsmJsonConverter::operator()(Literal const& _node) const
 		break;
 	case LiteralKind::String:
 		ret["kind"] = "string";
-		ret["hexValue"] = util::toHex(util::asBytes(_node.value.str()));
+		ret["hexValue"] = util::toHex(util::asBytes(formatLiteral(_node)));
 		break;
 	}
-	ret["type"] = _node.type.str();
-	if (util::validateUTF8(_node.value.str()))
-		ret["value"] = _node.value.str();
+	ret["type"] = "";
+	{
+		auto const formattedLiteral = formatLiteral(_node);
+		if (util::validateUTF8(formattedLiteral))
+			ret["value"] = formattedLiteral;
+	}
 	return ret;
 }
 
-Json::Value AsmJsonConverter::operator()(Identifier const& _node) const
+Json AsmJsonConverter::operator()(Identifier const& _node) const
 {
 	yulAssert(!_node.name.empty(), "Invalid identifier");
-	Json::Value ret = createAstNode(nativeLocationOf(_node), "YulIdentifier");
+	Json ret = createAstNode(originLocationOf(_node), nativeLocationOf(_node), "YulIdentifier");
 	ret["name"] = _node.name.str();
 	return ret;
 }
 
-Json::Value AsmJsonConverter::operator()(Assignment const& _node) const
+Json AsmJsonConverter::operator()(BuiltinName const& _node) const
 {
-	yulAssert(_node.variableNames.size() >= 1, "Invalid assignment syntax");
-	Json::Value ret = createAstNode(nativeLocationOf(_node), "YulAssignment");
-	for (auto const& var: _node.variableNames)
-		ret["variableNames"].append((*this)(var));
-	ret["value"] = _node.value ? std::visit(*this, *_node.value) : Json::nullValue;
+	// represents BuiltinName also with YulIdentifier node type to avoid a breaking change in the JSON interface
+	Json ret = createAstNode(originLocationOf(_node), nativeLocationOf(_node), "YulIdentifier");
+	ret["name"] = m_dialect.builtin(_node.handle).name;
 	return ret;
 }
 
-Json::Value AsmJsonConverter::operator()(FunctionCall const& _node) const
+Json AsmJsonConverter::operator()(Assignment const& _node) const
 {
-	Json::Value ret = createAstNode(nativeLocationOf(_node), "YulFunctionCall");
-	ret["functionName"] = (*this)(_node.functionName);
+	yulAssert(_node.variableNames.size() >= 1, "Invalid assignment syntax");
+	Json ret = createAstNode(originLocationOf(_node), nativeLocationOf(_node), "YulAssignment");
+	for (auto const& var: _node.variableNames)
+		ret["variableNames"].emplace_back((*this)(var));
+	ret["value"] = _node.value ? std::visit(*this, *_node.value) : Json();
+	return ret;
+}
+
+Json AsmJsonConverter::operator()(FunctionCall const& _node) const
+{
+	Json ret = createAstNode(originLocationOf(_node), nativeLocationOf(_node), "YulFunctionCall");
+	ret["functionName"] = std::visit(*this, _node.functionName);
 	ret["arguments"] = vectorOfVariantsToJson(_node.arguments);
 	return ret;
 }
 
-Json::Value AsmJsonConverter::operator()(ExpressionStatement const& _node) const
+Json AsmJsonConverter::operator()(ExpressionStatement const& _node) const
 {
-	Json::Value ret = createAstNode(nativeLocationOf(_node), "YulExpressionStatement");
+	Json ret = createAstNode(originLocationOf(_node), nativeLocationOf(_node), "YulExpressionStatement");
 	ret["expression"] = std::visit(*this, _node.expression);
 	return ret;
 }
 
-Json::Value AsmJsonConverter::operator()(VariableDeclaration const& _node) const
+Json AsmJsonConverter::operator()(VariableDeclaration const& _node) const
 {
-	Json::Value ret = createAstNode(nativeLocationOf(_node), "YulVariableDeclaration");
+	Json ret = createAstNode(originLocationOf(_node), nativeLocationOf(_node), "YulVariableDeclaration");
 	for (auto const& var: _node.variables)
-		ret["variables"].append((*this)(var));
-
-	ret["value"] = _node.value ? std::visit(*this, *_node.value) : Json::nullValue;
-
+		ret["variables"].emplace_back((*this)(var));
+	ret["value"] = _node.value ? std::visit(*this, *_node.value) : Json();
 	return ret;
 }
 
-Json::Value AsmJsonConverter::operator()(FunctionDefinition const& _node) const
+Json AsmJsonConverter::operator()(FunctionDefinition const& _node) const
 {
 	yulAssert(!_node.name.empty(), "Invalid function name.");
-	Json::Value ret = createAstNode(nativeLocationOf(_node), "YulFunctionDefinition");
+	Json ret = createAstNode(originLocationOf(_node), nativeLocationOf(_node), "YulFunctionDefinition");
 	ret["name"] = _node.name.str();
 	for (auto const& var: _node.parameters)
-		ret["parameters"].append((*this)(var));
+		ret["parameters"].emplace_back((*this)(var));
 	for (auto const& var: _node.returnVariables)
-		ret["returnVariables"].append((*this)(var));
+		ret["returnVariables"].emplace_back((*this)(var));
 	ret["body"] = (*this)(_node.body);
 	return ret;
 }
 
-Json::Value AsmJsonConverter::operator()(If const& _node) const
+Json AsmJsonConverter::operator()(If const& _node) const
 {
 	yulAssert(_node.condition, "Invalid if condition.");
-	Json::Value ret = createAstNode(nativeLocationOf(_node), "YulIf");
+	Json ret = createAstNode(originLocationOf(_node), nativeLocationOf(_node), "YulIf");
 	ret["condition"] = std::visit(*this, *_node.condition);
 	ret["body"] = (*this)(_node.body);
 	return ret;
 }
 
-Json::Value AsmJsonConverter::operator()(Switch const& _node) const
+Json AsmJsonConverter::operator()(Switch const& _node) const
 {
 	yulAssert(_node.expression, "Invalid expression pointer.");
-	Json::Value ret = createAstNode(nativeLocationOf(_node), "YulSwitch");
+	Json ret = createAstNode(originLocationOf(_node), nativeLocationOf(_node), "YulSwitch");
 	ret["expression"] = std::visit(*this, *_node.expression);
 	for (auto const& var: _node.cases)
-		ret["cases"].append((*this)(var));
+		ret["cases"].emplace_back((*this)(var));
 	return ret;
 }
 
-Json::Value AsmJsonConverter::operator()(Case const& _node) const
+Json AsmJsonConverter::operator()(Case const& _node) const
 {
-	Json::Value ret = createAstNode(nativeLocationOf(_node), "YulCase");
+	Json ret = createAstNode(originLocationOf(_node), nativeLocationOf(_node), "YulCase");
 	ret["value"] = _node.value ? (*this)(*_node.value) : "default";
 	ret["body"] = (*this)(_node.body);
 	return ret;
 }
 
-Json::Value AsmJsonConverter::operator()(ForLoop const& _node) const
+Json AsmJsonConverter::operator()(ForLoop const& _node) const
 {
 	yulAssert(_node.condition, "Invalid for loop condition.");
-	Json::Value ret = createAstNode(nativeLocationOf(_node), "YulForLoop");
+	Json ret = createAstNode(originLocationOf(_node), nativeLocationOf(_node), "YulForLoop");
 	ret["pre"] = (*this)(_node.pre);
 	ret["condition"] = std::visit(*this, *_node.condition);
 	ret["post"] = (*this)(_node.post);
@@ -168,38 +178,41 @@ Json::Value AsmJsonConverter::operator()(ForLoop const& _node) const
 	return ret;
 }
 
-Json::Value AsmJsonConverter::operator()(Break const& _node) const
+Json AsmJsonConverter::operator()(Break const& _node) const
 {
-	return createAstNode(nativeLocationOf(_node), "YulBreak");
+	return createAstNode(originLocationOf(_node), nativeLocationOf(_node), "YulBreak");
 }
 
-Json::Value AsmJsonConverter::operator()(Continue const& _node) const
+Json AsmJsonConverter::operator()(Continue const& _node) const
 {
-	return createAstNode(nativeLocationOf(_node), "YulContinue");
+	return createAstNode(originLocationOf(_node), nativeLocationOf(_node), "YulContinue");
 }
 
-Json::Value AsmJsonConverter::operator()(Leave const& _node) const
+Json AsmJsonConverter::operator()(Leave const& _node) const
 {
-	return createAstNode(nativeLocationOf(_node), "YulLeave");
+	return createAstNode(originLocationOf(_node), nativeLocationOf(_node), "YulLeave");
 }
 
-Json::Value AsmJsonConverter::createAstNode(langutil::SourceLocation const& _location, string _nodeType) const
+Json AsmJsonConverter::createAstNode(langutil::SourceLocation const& _originLocation, langutil::SourceLocation const& _nativeLocation, std::string _nodeType) const
 {
-	Json::Value ret{Json::objectValue};
+	Json ret;
 	ret["nodeType"] = std::move(_nodeType);
-	int length = -1;
-	if (_location.start >= 0 && _location.end >= 0)
-		length = _location.end - _location.start;
-	ret["src"] = to_string(_location.start) + ":" + to_string(length) + ":" + (m_sourceIndex.has_value() ? to_string(m_sourceIndex.value()) : "-1");
+	auto srcLocation = [&](int start, int end) -> std::string
+	{
+		int length = (start >= 0 && end >= 0 && end >= start) ? end - start : -1;
+		return std::to_string(start) + ":" + std::to_string(length) + ":" + (m_sourceIndex.has_value() ? std::to_string(m_sourceIndex.value()) : "-1");
+	};
+	ret["src"] = srcLocation(_originLocation.start, _originLocation.end);
+	ret["nativeSrc"] = srcLocation(_nativeLocation.start, _nativeLocation.end);
 	return ret;
 }
 
 template <class T>
-Json::Value AsmJsonConverter::vectorOfVariantsToJson(vector<T> const& _vec) const
+Json AsmJsonConverter::vectorOfVariantsToJson(std::vector<T> const& _vec) const
 {
-	Json::Value ret{Json::arrayValue};
+	Json ret = Json::array();
 	for (auto const& var: _vec)
-		ret.append(std::visit(*this, var));
+		ret.emplace_back(std::visit(*this, var));
 	return ret;
 }
 

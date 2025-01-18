@@ -10,7 +10,7 @@
 *.o
 *.obj
 *.pyc
-__pycache__
+__pycache__/
 
 # Precompiled Headers
 *.gch
@@ -27,17 +27,25 @@ __pycache__
 *.a
 *.lib
 
+# ignore git mergetool backup files
+*.orig
+
 # Executables
 *.exe
 *.out
 *.app
 
 # Build directory
-/build*
+/cmake-build-*/
+/build*/
 emscripten_build/
-/docs/_build
+/docs/_build/
 /docs/_static/robots.txt
-/deps
+/deps/
+
+# Reports and benchmarks
+/reports/
+/benchmarks/
 
 # vim stuff
 [._]*.sw[a-p]

@@ -3,6 +3,7 @@ set(sources
 	Common.h
 	CharStream.cpp
 	CharStream.h
+	DebugData.h
 	DebugInfoSelection.cpp
 	DebugInfoSelection.h
 	ErrorReporter.cpp
@@ -26,7 +27,6 @@ set(sources
 	SourceReferenceFormatter.h
 	Token.cpp
 	Token.h
-	UndefMacros.h
 	UniqueErrorReporter.h
 )
 

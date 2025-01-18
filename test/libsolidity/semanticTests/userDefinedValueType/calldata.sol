@@ -49,13 +49,13 @@ contract C {
 }
 // ----
 // test_f() -> true
-// gas irOptimized: 122070
-// gas legacy: 126150
-// gas legacyOptimized: 123163
+// gas irOptimized: 122201
+// gas legacy: 125333
+// gas legacyOptimized: 122693
 // test_g() -> true
-// gas irOptimized: 95980
-// gas legacy: 101281
-// gas legacyOptimized: 96566
+// gas irOptimized: 106408
+// gas legacy: 111133
+// gas legacyOptimized: 106925
 // addresses(uint256): 0 -> 0x18
 // addresses(uint256): 1 -> 0x19
 // addresses(uint256): 3 -> 0x1b

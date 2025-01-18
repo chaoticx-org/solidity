@@ -3,12 +3,12 @@
 [![Matrix Chat](https://img.shields.io/badge/Matrix%20-chat-brightgreen?style=plastic&logo=matrix)](https://matrix.to/#/#ethereum_solidity:gitter.im)
 [![Gitter Chat](https://img.shields.io/badge/Gitter%20-chat-brightgreen?style=plastic&logo=gitter)](https://gitter.im/ethereum/solidity)
 [![Solidity Forum](https://img.shields.io/badge/Solidity_Forum%20-discuss-brightgreen?style=plastic&logo=discourse)](https://forum.soliditylang.org/)
-[![Twitter Follow](https://img.shields.io/twitter/follow/solidity_lang?style=plastic&logo=twitter)](https://twitter.com/solidity_lang)
+[![X Follow](https://img.shields.io/twitter/follow/solidity_lang?style=plastic&logo=x)](https://X.com/solidity_lang)
 [![Mastodon Follow](https://img.shields.io/mastodon/follow/000335908?domain=https%3A%2F%2Ffosstodon.org%2F&logo=mastodon&style=plastic)](https://fosstodon.org/@solidity)
 
-You can talk to us on Gitter and Matrix, tweet at us on Twitter or create a new topic in the Solidity forum. Questions, feedback, and suggestions are welcome!
+You can talk to us on Gitter and Matrix, tweet at us on X (previously Twitter) or create a new topic in the Solidity forum. Questions, feedback, and suggestions are welcome!
 
-Solidity is a statically typed, contract-oriented, high-level language for implementing smart contracts on the Ethereum platform.
+Solidity is a statically-typed, contract-oriented, high-level language for implementing smart contracts on the Ethereum platform.
 
 For a good overview and starting point, please check out the official [Solidity Language Portal](https://soliditylang.org).
 
@@ -27,11 +27,11 @@ For a good overview and starting point, please check out the official [Solidity 
 
 Solidity is a statically-typed curly-braces programming language designed for developing smart contracts
 that run on the Ethereum Virtual Machine. Smart contracts are programs that are executed inside a peer-to-peer
-network where nobody has special authority over the execution, and thus they allow to implement tokens of value,
+network where nobody has special authority over the execution, and thus they allow anyone to implement tokens of value,
 ownership, voting, and other kinds of logic.
 
 When deploying contracts, you should use the latest released version of
-Solidity. This is because breaking changes, as well as new features and bug fixes are
+Solidity. This is because breaking changes, as well as new features and bug fixes, are
 introduced regularly. We currently use a 0.x version
 number [to indicate this fast pace of change](https://semver.org/#spec-item-4).
 
@@ -66,21 +66,21 @@ browser-based IDE. Here are some example contracts:
 
 ## Documentation
 
-The Solidity documentation is hosted at [Read the docs](https://docs.soliditylang.org).
+The Solidity documentation is hosted using [Read the Docs](https://docs.soliditylang.org).
 
 ## Development
 
 Solidity is still under development. Contributions are always welcome!
 Please follow the
-[Developers Guide](https://docs.soliditylang.org/en/latest/contributing.html)
+[Developer's Guide](https://docs.soliditylang.org/en/latest/contributing.html)
 if you want to help.
 
 You can find our current feature and bug priorities for forthcoming
 releases in the [projects section](https://github.com/ethereum/solidity/projects).
 
 ## Maintainers
-* [@axic](https://github.com/axic)
-* [@chriseth](https://github.com/chriseth)
+The Solidity programming language and compiler are open-source community projects governed by a core team.
+The core team is sponsored by the [Ethereum Foundation](https://ethereum.foundation/).
 
 ## License
 Solidity is licensed under [GNU General Public License v3.0](LICENSE.txt).

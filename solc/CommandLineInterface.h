@@ -24,9 +24,13 @@
 
 #include <solc/CommandLineParser.h>
 
+#include <libevmasm/AbstractAssemblyStack.h>
+#include <libevmasm/EVMAssemblyStack.h>
 #include <libsolidity/interface/CompilerStack.h>
 #include <libsolidity/interface/DebugSettings.h>
 #include <libsolidity/interface/FileReader.h>
+#include <libsolidity/interface/SMTSolverCommand.h>
+#include <libsolidity/interface/UniversalCallback.h>
 #include <libyul/YulStack.h>
 
 #include <iostream>
@@ -82,6 +86,7 @@ private:
 	void printVersion();
 	void printLicense();
 	void compile();
+	void assembleFromEVMAssemblyJSON();
 	void serveLSP();
 	void link();
 	void writeLinkedFiles();
@@ -90,17 +95,20 @@ private:
 	/// @returns the full object with library placeholder hints in hex.
 	static std::string objectWithLinkRefsHex(evmasm::LinkerObject const& _obj);
 
-	void assemble(yul::YulStack::Language _language, yul::YulStack::Machine _targetMachine);
+	void assembleYul(yul::YulStack::Language _language, yul::YulStack::Machine _targetMachine);
 
 	void outputCompilationResults();
 
 	void handleCombinedJSON();
 	void handleAst();
+	void handleEVMAssembly(std::string const& _contract);
 	void handleBinary(std::string const& _contract);
 	void handleOpcode(std::string const& _contract);
 	void handleIR(std::string const& _contract);
+	void handleIRAst(std::string const& _contract);
 	void handleIROptimized(std::string const& _contract);
-	void handleEwasm(std::string const& _contract);
+	void handleIROptimizedAst(std::string const& _contract);
+	void handleYulCFGExport(std::string const& _contract);
 	void handleBytecode(std::string const& _contract);
 	void handleSignatureHashes(std::string const& _contract);
 	void handleMetadata(std::string const& _contract);
@@ -108,12 +116,13 @@ private:
 	void handleNatspec(bool _natspecDev, std::string const& _contract);
 	void handleGasEstimation(std::string const& _contract);
 	void handleStorageLayout(std::string const& _contract);
+	void handleTransientStorageLayout(std::string const& _contract);
 
 	/// Tries to read @ m_sourceCodes as a JSONs holding ASTs
 	/// such that they can be imported into the compiler  (importASTs())
 	/// (produced by --combined-json ast <file.sol>
 	/// or standard-json output
-	std::map<std::string, Json::Value> parseAstFromInput();
+	std::map<std::string, Json> parseAstFromInput();
 
 	/// Create a file in the given directory
 	/// @arg _fileName the name of the file
@@ -133,13 +142,19 @@ private:
 	/// stream has ever been used unless @arg _markAsUsed is set to false.
 	std::ostream& serr(bool _markAsUsed = true);
 
+	void report(langutil::Error::Severity _severity, std::string _message);
+
 	std::istream& m_sin;
 	std::ostream& m_sout;
 	std::ostream& m_serr;
 	bool m_hasOutput = false;
 	FileReader m_fileReader;
+	SMTSolverCommand m_solverCommand;
+	UniversalCallback m_universalCallback{&m_fileReader, m_solverCommand};
 	std::optional<std::string> m_standardJsonInput;
 	std::unique_ptr<frontend::CompilerStack> m_compiler;
+	std::unique_ptr<evmasm::EVMAssemblyStack> m_evmAssemblyStack;
+	evmasm::AbstractAssemblyStack* m_assemblyStack = nullptr;
 	CommandLineOptions m_options;
 };
 

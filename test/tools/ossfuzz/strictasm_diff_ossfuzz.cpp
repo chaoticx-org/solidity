@@ -21,6 +21,7 @@
 #include <libyul/Dialect.h>
 #include <libyul/backends/evm/EVMDialect.h>
 #include <libyul/YulStack.h>
+#include <libyul/AST.h>
 
 #include <liblangutil/DebugInfoSelection.h>
 #include <liblangutil/Exceptions.h>
@@ -36,7 +37,6 @@
 #include <memory>
 #include <iostream>
 
-using namespace std;
 using namespace solidity;
 using namespace solidity::yul;
 using namespace solidity::util;
@@ -51,7 +51,7 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t const* _data, size_t _size)
 	if (_size > 600)
 		return 0;
 
-	string input(reinterpret_cast<char const*>(_data), _size);
+	std::string input(reinterpret_cast<char const*>(_data), _size);
 
 	if (std::any_of(input.begin(), input.end(), [](char c) {
 		return ((static_cast<unsigned char>(c) > 127) || !(isPrint(c) || (c == '\n') || (c == '\t')));
@@ -62,6 +62,7 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t const* _data, size_t _size)
 
 	YulStack stack(
 		langutil::EVMVersion(),
+		std::nullopt,
 		YulStack::Language::StrictAssembly,
 		solidity::frontend::OptimiserSettings::full(),
 		DebugInfoSelection::All()
@@ -70,7 +71,7 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t const* _data, size_t _size)
 	{
 		if (
 			!stack.parseAndAnalyze("source", input) ||
-			!stack.parserResult()->code ||
+			!stack.parserResult()->hasCode() ||
 			!stack.parserResult()->analysisInfo
 		)
 			return 0;
@@ -80,16 +81,17 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t const* _data, size_t _size)
 		return 0;
 	}
 
-	ostringstream os1;
-	ostringstream os2;
+	std::ostringstream os1;
+	std::ostringstream os2;
 	// Disable memory tracing to avoid false positive reports
 	// such as unused write to memory e.g.,
 	// { mstore(0, 1) }
 	// that would be removed by the redundant store eliminator.
+	// TODO: Add EOF support
 	yulFuzzerUtil::TerminationReason termReason = yulFuzzerUtil::interpret(
 		os1,
-		stack.parserResult()->code,
-		EVMDialect::strictAssemblyForEVMObjects(langutil::EVMVersion()),
+		stack.parserResult()->code()->root(),
+		EVMDialect::strictAssemblyForEVMObjects(langutil::EVMVersion(), std::nullopt),
 		/*disableMemoryTracing=*/true
 	);
 	if (yulFuzzerUtil::resourceLimitsExceeded(termReason))
@@ -98,8 +100,8 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t const* _data, size_t _size)
 	stack.optimize();
 	termReason = yulFuzzerUtil::interpret(
 		os2,
-		stack.parserResult()->code,
-		EVMDialect::strictAssemblyForEVMObjects(langutil::EVMVersion()),
+		stack.parserResult()->code()->root(),
+		EVMDialect::strictAssemblyForEVMObjects(langutil::EVMVersion(), std::nullopt),
 		/*disableMemoryTracing=*/true
 	);
 

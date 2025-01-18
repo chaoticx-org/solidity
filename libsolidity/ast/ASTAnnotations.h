@@ -39,7 +39,7 @@ namespace solidity::yul
 {
 struct AsmAnalysisInfo;
 struct Identifier;
-struct Dialect;
+class Dialect;
 }
 
 namespace solidity::frontend
@@ -65,8 +65,8 @@ struct ASTAnnotation
 
 struct DocTag
 {
-	std::string content;	///< The text content of the tag.
-	std::string paramName;	///< Only used for @param, stores the parameter name.
+	std::string content;    ///< The text content of the tag.
+	std::string paramName;  ///< Only used for @param, stores the parameter name.
 };
 
 struct StructurallyDocumentedAnnotation
@@ -168,6 +168,9 @@ struct ContractDefinitionAnnotation: TypeDeclarationAnnotation, StructurallyDocu
 	/// List of contracts whose bytecode is referenced by this contract, e.g. through "new".
 	/// The Value represents the ast node that referenced the contract.
 	std::map<ContractDefinition const*, ASTNode const*, ASTCompareByID<ContractDefinition>> contractDependencies;
+
+	// Per-contract map from function AST IDs to internal dispatch function IDs.
+	std::map<FunctionDefinition const*, uint64_t> internalFunctionIDs;
 };
 
 struct CallableDeclarationAnnotation: DeclarationAnnotation
@@ -235,12 +238,15 @@ struct TryCatchClauseAnnotation: ASTAnnotation, ScopableAnnotation
 
 struct ForStatementAnnotation: StatementAnnotation, ScopableAnnotation
 {
+	util::SetOnce<bool> isSimpleCounterLoop;
 };
 
 struct ReturnAnnotation: StatementAnnotation
 {
 	/// Reference to the return parameters of the function.
 	ParameterList const* functionReturnParameters = nullptr;
+	/// Reference to the function containing the return statement.
+	FunctionDefinition const* function = nullptr;
 };
 
 struct TypeNameAnnotation: ASTAnnotation
@@ -273,10 +279,6 @@ struct ExpressionAnnotation: ASTAnnotation
 	util::SetOnce<bool> isLValue;
 	/// Whether the expression is used in a context where the LValue is actually required.
 	bool willBeWrittenTo = false;
-	/// Whether the expression is an lvalue that is only assigned.
-	/// Would be false for --, ++, delete, +=, -=, ....
-	/// Only relevant if isLvalue == true
-	bool lValueOfOrdinaryAssignment = false;
 
 	/// Types and - if given - names of arguments if the expr. is a function
 	/// that is called, used for overload resolution
@@ -312,7 +314,12 @@ struct MemberAccessAnnotation: ExpressionAnnotation
 	util::SetOnce<VirtualLookup> requiredLookup;
 };
 
-struct BinaryOperationAnnotation: ExpressionAnnotation
+struct OperationAnnotation: ExpressionAnnotation
+{
+	util::SetOnce<FunctionDefinition const*> userDefinedFunction;
+};
+
+struct BinaryOperationAnnotation: OperationAnnotation
 {
 	/// The common type that is used for the operation, not necessarily the result type (which
 	/// e.g. for comparisons is bool).
@@ -332,5 +339,17 @@ struct FunctionCallAnnotation: ExpressionAnnotation
 	/// If true, this is the external call of a try statement.
 	bool tryCall = false;
 };
+
+/// Experimental Solidity annotations.
+/// Used to integrate with name and type resolution.
+/// @{
+struct TypeClassDefinitionAnnotation: TypeDeclarationAnnotation, StructurallyDocumentedAnnotation
+{
+};
+
+struct ForAllQuantifierAnnotation: StatementAnnotation, ScopableAnnotation
+{
+};
+/// @}
 
 }

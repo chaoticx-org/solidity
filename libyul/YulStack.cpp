@@ -15,321 +15,434 @@
 	along with solidity.  If not, see <http://www.gnu.org/licenses/>.
 */
 // SPDX-License-Identifier: GPL-3.0
-/**
- * Full assembly stack that can support EVM-assembly and Yul as input and EVM, EVM1.5 and
- * Ewasm as output.
- */
-
 
 #include <libyul/YulStack.h>
 
 #include <libyul/AsmAnalysis.h>
 #include <libyul/AsmAnalysisInfo.h>
+#include <libyul/backends/evm/SSAControlFlowGraphBuilder.h>
 #include <libyul/backends/evm/EthAssemblyAdapter.h>
 #include <libyul/backends/evm/EVMCodeTransform.h>
 #include <libyul/backends/evm/EVMDialect.h>
 #include <libyul/backends/evm/EVMObjectCompiler.h>
-#include <libyul/backends/evm/EVMMetrics.h>
-#include <libyul/backends/wasm/WasmDialect.h>
-#include <libyul/backends/wasm/WasmObjectCompiler.h>
-#include <libyul/backends/wasm/EVMToEwasmTranslator.h>
 #include <libyul/ObjectParser.h>
+#include <libyul/optimiser/Semantics.h>
 #include <libyul/optimiser/Suite.h>
-
+#include <libyul/YulControlFlowGraphExporter.h>
 #include <libevmasm/Assembly.h>
 #include <liblangutil/Scanner.h>
+#include <liblangutil/SourceReferenceFormatter.h>
+
 #include <boost/algorithm/string.hpp>
+
 #include <optional>
 
-using namespace std;
 using namespace solidity;
+using namespace solidity::frontend;
 using namespace solidity::yul;
 using namespace solidity::langutil;
+using namespace solidity::util;
 
-namespace
-{
-Dialect const& languageToDialect(YulStack::Language _language, EVMVersion _version)
-{
-	switch (_language)
-	{
-	case YulStack::Language::Assembly:
-	case YulStack::Language::StrictAssembly:
-		return EVMDialect::strictAssemblyForEVMObjects(_version);
-	case YulStack::Language::Yul:
-		return EVMDialectTyped::instance(_version);
-	case YulStack::Language::Ewasm:
-		return WasmDialect::instance();
-	}
-	yulAssert(false, "");
-	return Dialect::yulDeprecated();
-}
-
-// Duplicated from libsolidity/codegen/CompilerContext.cpp
-// TODO: refactor and remove duplication
-evmasm::Assembly::OptimiserSettings translateOptimiserSettings(
-	frontend::OptimiserSettings const& _settings,
-	langutil::EVMVersion _evmVersion
-)
-{
-	// Constructing it this way so that we notice changes in the fields.
-	evmasm::Assembly::OptimiserSettings asmSettings{false,  false, false, false, false, false, _evmVersion, 0};
-	asmSettings.runInliner = _settings.runInliner;
-	asmSettings.runJumpdestRemover = _settings.runJumpdestRemover;
-	asmSettings.runPeephole = _settings.runPeephole;
-	asmSettings.runDeduplicate = _settings.runDeduplicate;
-	asmSettings.runCSE = _settings.runCSE;
-	asmSettings.runConstantOptimiser = _settings.runConstantOptimiser;
-	asmSettings.expectedExecutionsPerDeployment = _settings.expectedExecutionsPerDeployment;
-	asmSettings.evmVersion = _evmVersion;
-
-	return asmSettings;
-}
-
-}
-
-
-CharStream const& YulStack::charStream(string const& _sourceName) const
+CharStream const& YulStack::charStream(std::string const& _sourceName) const
 {
 	yulAssert(m_charStream, "");
 	yulAssert(m_charStream->name() == _sourceName, "");
 	return *m_charStream;
 }
 
+bool YulStack::parse(std::string const& _sourceName, std::string const& _source)
+{
+	yulAssert(m_stackState == Empty);
+	try
+	{
+		m_charStream = std::make_unique<CharStream>(_source, _sourceName);
+		std::shared_ptr<Scanner> scanner = std::make_shared<Scanner>(*m_charStream);
+		m_parserResult = ObjectParser(m_errorReporter, languageToDialect(m_language, m_evmVersion, m_eofVersion)).parse(scanner, false);
+	}
+	catch (UnimplementedFeatureError const& _error)
+	{
+		reportUnimplementedFeatureError(_error);
+		return false;
+	}
+
+	if (!m_errorReporter.hasErrors())
+		m_stackState = Parsed;
+
+	return m_stackState == Parsed;
+}
+
 bool YulStack::parseAndAnalyze(std::string const& _sourceName, std::string const& _source)
 {
 	m_errors.clear();
-	m_analysisSuccessful = false;
-	m_charStream = make_unique<CharStream>(_source, _sourceName);
-	shared_ptr<Scanner> scanner = make_shared<Scanner>(*m_charStream);
-	m_parserResult = ObjectParser(m_errorReporter, languageToDialect(m_language, m_evmVersion)).parse(scanner, false);
-	if (!m_errorReporter.errors().empty())
+	yulAssert(m_stackState == Empty);
+
+	if (!parse(_sourceName, _source))
 		return false;
+
+	yulAssert(m_stackState == Parsed);
 	yulAssert(m_parserResult, "");
-	yulAssert(m_parserResult->code, "");
+	yulAssert(m_parserResult->hasCode());
 
 	return analyzeParsed();
 }
 
 void YulStack::optimize()
 {
-	if (!m_optimiserSettings.runYulOptimiser)
-		return;
+	yulAssert(m_stackState >= AnalysisSuccessful, "Analysis was not successful.");
+	yulAssert(m_parserResult);
 
-	yulAssert(m_analysisSuccessful, "Analysis was not successful.");
+	try
+	{
+		if (
+			!m_optimiserSettings.runYulOptimiser &&
+			yul::MSizeFinder::containsMSize(*m_parserResult)
+		)
+			return;
 
-	m_analysisSuccessful = false;
-	yulAssert(m_parserResult, "");
-	optimize(*m_parserResult, true);
-	yulAssert(analyzeParsed(), "Invalid source code after optimization.");
-}
+		auto [optimizeStackAllocation, yulOptimiserSteps, yulOptimiserCleanupSteps] = [&]() -> std::tuple<bool, std::string, std::string>
+		{
+			if (!m_optimiserSettings.runYulOptimiser)
+			{
+				// Yul optimizer disabled, but empty sequence (:) explicitly provided
+				if (OptimiserSuite::isEmptyOptimizerSequence(m_optimiserSettings.yulOptimiserSteps + ":" + m_optimiserSettings.yulOptimiserCleanupSteps))
+					return std::make_tuple(true, "", "");
+				// Yul optimizer disabled, and no sequence explicitly provided (assumes default sequence)
+				else
+				{
+					yulAssert(
+						m_optimiserSettings.yulOptimiserSteps == OptimiserSettings::DefaultYulOptimiserSteps &&
+						m_optimiserSettings.yulOptimiserCleanupSteps == OptimiserSettings::DefaultYulOptimiserCleanupSteps
+					);
+					// Defaults are the minimum necessary to avoid running into "Stack too deep" constantly.
+					return std::make_tuple(true, "u", "");
+				}
+			}
+			return std::make_tuple(
+				m_optimiserSettings.optimizeStackAllocation,
+				m_optimiserSettings.yulOptimiserSteps,
+				m_optimiserSettings.yulOptimiserCleanupSteps
+			);
+		}();
 
-void YulStack::translate(YulStack::Language _targetLanguage)
-{
-	if (m_language == _targetLanguage)
-		return;
+		m_stackState = Parsed;
+		solAssert(m_objectOptimizer);
+		m_objectOptimizer->optimize(
+			*m_parserResult,
+			ObjectOptimizer::Settings{
+				m_language,
+				m_evmVersion,
+				m_eofVersion,
+				optimizeStackAllocation,
+				yulOptimiserSteps,
+				yulOptimiserCleanupSteps,
+				m_optimiserSettings.expectedExecutionsPerDeployment
+			}
+		);
 
-	yulAssert(
-		m_language == Language::StrictAssembly && _targetLanguage == Language::Ewasm,
-		"Invalid language combination"
-	);
-
-	*m_parserResult = EVMToEwasmTranslator(
-		languageToDialect(m_language, m_evmVersion),
-		*this
-	).run(*parserResult());
-
-	m_language = _targetLanguage;
+		// Optimizer does not maintain correct native source locations in the AST.
+		// We can work around it by regenerating the AST from scratch from optimized IR.
+		reparse();
+	}
+	catch (UnimplementedFeatureError const& _error)
+	{
+		reportUnimplementedFeatureError(_error);
+	}
 }
 
 bool YulStack::analyzeParsed()
 {
+	yulAssert(m_stackState >= Parsed);
 	yulAssert(m_parserResult, "");
-	m_analysisSuccessful = analyzeParsed(*m_parserResult);
-	return m_analysisSuccessful;
+	return analyzeParsed(*m_parserResult);
 }
 
 bool YulStack::analyzeParsed(Object& _object)
 {
-	yulAssert(_object.code, "");
-	_object.analysisInfo = make_shared<AsmAnalysisInfo>();
+	yulAssert(m_stackState >= Parsed);
+	yulAssert(_object.hasCode());
+	_object.analysisInfo = std::make_shared<AsmAnalysisInfo>();
 
 	AsmAnalyzer analyzer(
 		*_object.analysisInfo,
 		m_errorReporter,
-		languageToDialect(m_language, m_evmVersion),
+		languageToDialect(m_language, m_evmVersion, m_eofVersion),
 		{},
-		_object.qualifiedDataNames()
+		_object.summarizeStructure()
 	);
-	bool success = analyzer.analyze(*_object.code);
-	for (auto& subNode: _object.subObjects)
-		if (auto subObject = dynamic_cast<Object*>(subNode.get()))
-			if (!analyzeParsed(*subObject))
-				success = false;
+
+	bool success = false;
+	try
+	{
+		success = analyzer.analyze(_object.code()->root());
+		for (auto& subNode: _object.subObjects)
+			if (auto subObject = dynamic_cast<Object*>(subNode.get()))
+				if (!analyzeParsed(*subObject))
+					success = false;
+	}
+	catch (UnimplementedFeatureError const& _error)
+	{
+		reportUnimplementedFeatureError(_error);
+		success = false;
+	}
+
+	if (success)
+		m_stackState = AnalysisSuccessful;
+
 	return success;
 }
 
 void YulStack::compileEVM(AbstractAssembly& _assembly, bool _optimize) const
 {
-	EVMDialect const* dialect = nullptr;
-	switch (m_language)
-	{
-		case Language::Assembly:
-		case Language::StrictAssembly:
-			dialect = &EVMDialect::strictAssemblyForEVMObjects(m_evmVersion);
-			break;
-		case Language::Yul:
-			dialect = &EVMDialectTyped::instance(m_evmVersion);
-			break;
-		default:
-			yulAssert(false, "Invalid language.");
-			break;
-	}
-
-	EVMObjectCompiler::compile(*m_parserResult, _assembly, *dialect, _optimize);
+	EVMObjectCompiler::compile(*m_parserResult, _assembly, _optimize);
 }
 
-void YulStack::optimize(Object& _object, bool _isCreation)
+void YulStack::reparse()
 {
-	yulAssert(_object.code, "");
-	yulAssert(_object.analysisInfo, "");
-	for (auto& subNode: _object.subObjects)
-		if (auto subObject = dynamic_cast<Object*>(subNode.get()))
-		{
-			bool isCreation = !boost::ends_with(subObject->name.str(), "_deployed");
-			optimize(*subObject, isCreation);
-		}
+	yulAssert(m_parserResult);
+	yulAssert(m_charStream);
 
-	Dialect const& dialect = languageToDialect(m_language, m_evmVersion);
-	unique_ptr<GasMeter> meter;
-	if (EVMDialect const* evmDialect = dynamic_cast<EVMDialect const*>(&dialect))
-		meter = make_unique<GasMeter>(*evmDialect, _isCreation, m_optimiserSettings.expectedExecutionsPerDeployment);
-	OptimiserSuite::run(
-		dialect,
-		meter.get(),
-		_object,
-		m_optimiserSettings.optimizeStackAllocation,
-		m_optimiserSettings.yulOptimiserSteps,
-		_isCreation ? nullopt : make_optional(m_optimiserSettings.expectedExecutionsPerDeployment),
-		{}
+	// NOTE: it is important for the source printed here to exactly match what the compiler will
+	// eventually output to the user. In particular, debug info must be exactly the same.
+	// Otherwise source locations will be off.
+	std::string source = print();
+
+	YulStack cleanStack(
+		m_evmVersion,
+		m_eofVersion,
+		m_language,
+		m_optimiserSettings,
+		m_debugInfoSelection,
+		m_soliditySourceProvider,
+		m_objectOptimizer
 	);
+	bool reanalysisSuccessful = cleanStack.parseAndAnalyze(m_charStream->name(), source);
+	yulAssert(
+		reanalysisSuccessful,
+		source + "\n\n"
+		"Invalid IR generated:\n" +
+		SourceReferenceFormatter::formatErrorInformation(cleanStack.errors(), cleanStack) + "\n"
+	);
+
+	m_stackState = AnalysisSuccessful;
+	m_parserResult = std::move(cleanStack.m_parserResult);
+
+	// NOTE: We keep the char stream, and errors, even though they no longer match the object,
+	// because it's the original source that matters to the user. Optimized code may have different
+	// locations and fewer warnings.
 }
 
-MachineAssemblyObject YulStack::assemble(Machine _machine) const
+MachineAssemblyObject YulStack::assemble(Machine _machine)
 {
-	yulAssert(m_analysisSuccessful, "");
+	yulAssert(m_stackState >= AnalysisSuccessful);
 	yulAssert(m_parserResult, "");
-	yulAssert(m_parserResult->code, "");
+	yulAssert(m_parserResult->hasCode(), "");
 	yulAssert(m_parserResult->analysisInfo, "");
 
 	switch (_machine)
 	{
 	case Machine::EVM:
 		return assembleWithDeployed().first;
-	case Machine::Ewasm:
-	{
-		yulAssert(m_language == Language::Ewasm, "");
-		Dialect const& dialect = languageToDialect(m_language, EVMVersion{});
-
-		MachineAssemblyObject object;
-		auto result = WasmObjectCompiler::compile(*m_parserResult, dialect);
-		object.assembly = std::move(result.first);
-		object.bytecode = make_shared<evmasm::LinkerObject>();
-		object.bytecode->bytecode = std::move(result.second);
-		return object;
 	}
-	}
-	// unreachable
-	return MachineAssemblyObject();
+	unreachable();
 }
 
 std::pair<MachineAssemblyObject, MachineAssemblyObject>
-YulStack::assembleWithDeployed(optional<string_view> _deployName) const
+YulStack::assembleWithDeployed(std::optional<std::string_view> _deployName)
 {
+	yulAssert(m_charStream);
+
 	auto [creationAssembly, deployedAssembly] = assembleEVMWithDeployed(_deployName);
-	yulAssert(creationAssembly, "");
-	yulAssert(m_charStream, "");
+	if (!creationAssembly)
+	{
+		yulAssert(!deployedAssembly);
+		return {MachineAssemblyObject{}, MachineAssemblyObject{}};
+	}
 
 	MachineAssemblyObject creationObject;
-	creationObject.bytecode = make_shared<evmasm::LinkerObject>(creationAssembly->assemble());
-	yulAssert(creationObject.bytecode->immutableReferences.empty(), "Leftover immutables.");
-	creationObject.assembly = creationAssembly->assemblyString(m_debugInfoSelection);
-	creationObject.sourceMappings = make_unique<string>(
-		evmasm::AssemblyItem::computeSourceMapping(
-			creationAssembly->items(),
-			{{m_charStream->name(), 0}}
-		)
-	);
-
 	MachineAssemblyObject deployedObject;
-	if (deployedAssembly)
+	try
 	{
-		deployedObject.bytecode = make_shared<evmasm::LinkerObject>(deployedAssembly->assemble());
-		deployedObject.assembly = deployedAssembly->assemblyString(m_debugInfoSelection);
-		deployedObject.sourceMappings = make_unique<string>(
-			evmasm::AssemblyItem::computeSourceMapping(
-				deployedAssembly->items(),
+		creationObject.bytecode = std::make_shared<evmasm::LinkerObject>(creationAssembly->assemble());
+		yulAssert(creationObject.bytecode->immutableReferences.empty(), "Leftover immutables.");
+		creationObject.assembly = creationAssembly;
+		creationObject.sourceMappings = std::make_unique<std::string>();
+		for (auto const& codeSection: creationAssembly->codeSections())
+		{
+			*creationObject.sourceMappings += evmasm::AssemblyItem::computeSourceMapping(
+				codeSection.items,
 				{{m_charStream->name(), 0}}
-			)
-		);
+			);
+		}
+
+		if (deployedAssembly)
+		{
+			deployedObject.bytecode = std::make_shared<evmasm::LinkerObject>(deployedAssembly->assemble());
+			deployedObject.assembly = deployedAssembly;
+			solAssert(deployedAssembly->codeSections().size() == 1);
+			deployedObject.sourceMappings = std::make_unique<std::string>(
+				evmasm::AssemblyItem::computeSourceMapping(
+					deployedAssembly->codeSections().front().items,
+					{{m_charStream->name(), 0}}
+					)
+			);
+		}
+	}
+	catch (Error const& _error)
+	{
+		m_errorReporter.codeGenerationError(_error);
+		return {MachineAssemblyObject{}, MachineAssemblyObject{}};
+	}
+	catch (UnimplementedFeatureError const& _error)
+	{
+		reportUnimplementedFeatureError(_error);
+		return {MachineAssemblyObject{}, MachineAssemblyObject{}};
 	}
 
 	return {std::move(creationObject), std::move(deployedObject)};
 }
 
 std::pair<std::shared_ptr<evmasm::Assembly>, std::shared_ptr<evmasm::Assembly>>
-YulStack::assembleEVMWithDeployed(optional<string_view> _deployName) const
+YulStack::assembleEVMWithDeployed(std::optional<std::string_view> _deployName)
 {
-	yulAssert(m_analysisSuccessful, "");
+	yulAssert(m_stackState >= AnalysisSuccessful);
 	yulAssert(m_parserResult, "");
-	yulAssert(m_parserResult->code, "");
+	yulAssert(m_parserResult->hasCode(), "");
 	yulAssert(m_parserResult->analysisInfo, "");
 
-	evmasm::Assembly assembly(true, {});
+	evmasm::Assembly assembly(m_evmVersion, true, m_eofVersion, {});
 	EthAssemblyAdapter adapter(assembly);
-	compileEVM(adapter, m_optimiserSettings.optimizeStackAllocation);
 
-	assembly.optimise(translateOptimiserSettings(m_optimiserSettings, m_evmVersion));
-
-	optional<size_t> subIndex;
-
-	// Pick matching assembly if name was given
-	if (_deployName.has_value())
+	// NOTE: We always need stack optimization when Yul optimizer is disabled (unless code contains
+	// msize). It being disabled just means that we don't use the full step sequence. We still run
+	// it with the minimal steps required to avoid "stack too deep".
+	bool optimize = m_optimiserSettings.optimizeStackAllocation || (
+		!m_optimiserSettings.runYulOptimiser &&
+		!yul::MSizeFinder::containsMSize(*m_parserResult)
+	);
+	try
 	{
-		for (size_t i = 0; i < assembly.numSubs(); i++)
-			if (assembly.sub(i).name() == _deployName)
+		compileEVM(adapter, optimize);
+
+		assembly.optimise(evmasm::Assembly::OptimiserSettings::translateSettings(m_optimiserSettings, m_evmVersion));
+
+		std::optional<size_t> subIndex;
+
+		// Pick matching assembly if name was given
+		if (_deployName.has_value())
+		{
+			for (size_t i = 0; i < assembly.numSubs(); i++)
+				if (assembly.sub(i).name() == _deployName)
+				{
+					subIndex = i;
+					break;
+				}
+
+			solAssert(subIndex.has_value(), "Failed to find object to be deployed.");
+		}
+		// Otherwise use heuristic: If there is a single sub-assembly, this is likely the object to be deployed.
+		else if (assembly.numSubs() == 1)
+			subIndex = 0;
+
+		if (subIndex.has_value())
+		{
+			evmasm::Assembly& runtimeAssembly = assembly.sub(*subIndex);
+			return {std::make_shared<evmasm::Assembly>(assembly), std::make_shared<evmasm::Assembly>(runtimeAssembly)};
+		}
+	}
+	catch (Error const& _error)
+	{
+		m_errorReporter.codeGenerationError(_error);
+		return {nullptr, nullptr};
+	}
+	catch (UnimplementedFeatureError const& _error)
+	{
+		reportUnimplementedFeatureError(_error);
+		return {nullptr, nullptr};
+	}
+
+	return {std::make_shared<evmasm::Assembly>(assembly), nullptr};
+}
+
+std::string YulStack::print() const
+{
+	yulAssert(m_stackState >= Parsed);
+	yulAssert(m_parserResult, "");
+	yulAssert(m_parserResult->hasCode(), "");
+	return m_parserResult->toString(
+		m_debugInfoSelection,
+		m_soliditySourceProvider
+	) + "\n";
+}
+
+Json YulStack::astJson() const
+{
+	yulAssert(m_stackState >= Parsed);
+	yulAssert(m_parserResult, "");
+	yulAssert(m_parserResult->hasCode(), "");
+	return  m_parserResult->toJson();
+}
+
+Json YulStack::cfgJson() const
+{
+	yulAssert(m_parserResult, "");
+	yulAssert(m_parserResult->hasCode(), "");
+	yulAssert(m_parserResult->analysisInfo, "");
+	// FIXME: we should not regenerate the cfg, but for now this is sufficient for testing purposes
+	auto exportCFGFromObject = [&](Object const& _object) -> Json {
+		// NOTE: The block Ids are reset for each object
+		std::unique_ptr<ControlFlow> controlFlow = SSAControlFlowGraphBuilder::build(
+			*_object.analysisInfo.get(),
+			languageToDialect(m_language, m_evmVersion, m_eofVersion),
+			_object.code()->root()
+		);
+		std::unique_ptr<ControlFlowLiveness> liveness = std::make_unique<ControlFlowLiveness>(*controlFlow);
+		YulControlFlowGraphExporter exporter(*controlFlow, liveness.get());
+		return exporter.run();
+	};
+
+	std::function<Json(std::vector<std::shared_ptr<ObjectNode>>)> exportCFGFromSubObjects;
+	exportCFGFromSubObjects = [&](std::vector<std::shared_ptr<ObjectNode>> _subObjects) -> Json {
+		Json subObjectsJson = Json::object();
+		for (std::shared_ptr<ObjectNode> const& subObjectNode: _subObjects)
+			if (Object const* subObject = dynamic_cast<Object const*>(subObjectNode.get()))
 			{
-				subIndex = i;
-				break;
+				subObjectsJson[subObject->name] = exportCFGFromObject(*subObject);
+				subObjectsJson["type"] = "subObject";
+				if (!subObject->subObjects.empty())
+					subObjectsJson[subObject->name]["subObjects"] = exportCFGFromSubObjects(subObject->subObjects);
 			}
+		return subObjectsJson;
+	};
 
-		solAssert(subIndex.has_value(), "Failed to find object to be deployed.");
-	}
-	// Otherwise use heuristic: If there is a single sub-assembly, this is likely the object to be deployed.
-	else if (assembly.numSubs() == 1)
-		subIndex = 0;
-
-	if (subIndex.has_value())
-	{
-		evmasm::Assembly& runtimeAssembly = assembly.sub(*subIndex);
-		return {make_shared<evmasm::Assembly>(assembly), make_shared<evmasm::Assembly>(runtimeAssembly)};
-	}
-
-	return {make_shared<evmasm::Assembly>(assembly), {}};
+	Object const& object = *m_parserResult.get();
+	Json jsonObject = Json::object();
+	jsonObject[object.name] = exportCFGFromObject(object);
+	jsonObject["type"] = "Object";
+	if (!object.subObjects.empty())
+		jsonObject[object.name]["subObjects"] = exportCFGFromSubObjects(object.subObjects);
+	return jsonObject;
 }
 
-string YulStack::print(
-	CharStreamProvider const* _soliditySourceProvider
-) const
+std::shared_ptr<Object> YulStack::parserResult() const
 {
+	yulAssert(m_stackState >= AnalysisSuccessful, "Analysis was not successful.");
 	yulAssert(m_parserResult, "");
-	yulAssert(m_parserResult->code, "");
-	return m_parserResult->toString(&languageToDialect(m_language, m_evmVersion), m_debugInfoSelection, _soliditySourceProvider) + "\n";
-}
-
-shared_ptr<Object> YulStack::parserResult() const
-{
-	yulAssert(m_analysisSuccessful, "Analysis was not successful.");
-	yulAssert(m_parserResult, "");
-	yulAssert(m_parserResult->code, "");
+	yulAssert(m_parserResult->hasCode(), "");
 	return m_parserResult;
+}
+
+Dialect const& YulStack::dialect() const
+{
+	yulAssert(m_stackState >= AnalysisSuccessful);
+	yulAssert(m_parserResult && m_parserResult->dialect());
+	return *m_parserResult->dialect();
+}
+
+void YulStack::reportUnimplementedFeatureError(UnimplementedFeatureError const& _error)
+{
+	yulAssert(m_charStream);
+	yulAssert(_error.comment(), "Errors must include a message for the user.");
+	if (_error.sourceLocation().sourceName)
+		yulAssert(*_error.sourceLocation().sourceName == m_charStream->name());
+	m_errorReporter.unimplementedFeatureError(1920_error, _error.sourceLocation(), *_error.comment());
 }

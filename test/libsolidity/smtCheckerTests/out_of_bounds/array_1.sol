@@ -18,9 +18,6 @@ contract C {
 }
 // ====
 // SMTEngine: all
-// SMTIgnoreOS: macos
+// SMTTargets: outOfBounds
 // ----
-// Warning 4984: (112-115): CHC: Overflow (resulting value larger than 2**256 - 1) might happen here.
 // Warning 6368: (259-263): CHC: Out of bounds access happens here.\nCounterexample:\na = [0], l = 1\n = 0\n\nTransaction trace:\nC.constructor()\nState: a = [], l = 0\nC.p()\nState: a = [0], l = 1\nC.r()
-// Info 1180: Contract invariant(s) for :C:\n((a.length + ((- 1) * l)) <= 0)\n
-// Warning 2661: (112-115): BMC: Overflow (resulting value larger than 2**256 - 1) happens here.

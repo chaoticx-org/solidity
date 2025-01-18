@@ -19,10 +19,8 @@ contract c {
         y = data2[0][4];
     }
 }
-// ====
-// compileToEwasm: also
 // ----
 // test() -> 3, 4
-// gas irOptimized: 189690
-// gas legacy: 195353
-// gas legacyOptimized: 192441
+// gas irOptimized: 169669
+// gas legacy: 175415
+// gas legacyOptimized: 172533

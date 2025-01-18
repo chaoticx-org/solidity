@@ -27,6 +27,7 @@
 #include <libyul/optimiser/OptimiserStep.h>
 #include <libyul/optimiser/Semantics.h>
 #include <libyul/optimiser/UnusedStoreBase.h>
+#include <libyul/optimiser/KnowledgeBase.h>
 
 #include <libevmasm/SemanticInformation.h>
 
@@ -35,21 +36,25 @@
 
 namespace solidity::yul
 {
-struct Dialect;
+class Dialect;
 struct AssignedValue;
 
 /**
- * Optimizer component that removes sstore statements if they
- * are overwritten in all code paths or never read from.
+ * Optimizer component that removes sstore and memory store statements if conditions are met for their removal.
+ * In case of an sstore, if all outgoing code paths revert (due to an explicit revert(), invalid(),
+ * or infinite recursion) or lead to another ``sstore`` for which the optimizer can tell that it will overwrite the first store,
+ * the statement will be removed.
  *
- * The m_store member of UnusedStoreBase is only used with the empty yul string
- * as key in the first dimension.
+ * For memory store operations, things are generally simpler, at least in the outermost yul block as all such statements
+ * will be removed if they are never read from in any code path. At function analysis level however, the approach is similar
+ * to sstore, as we don't know whether the memory location will be read once we leave the function's scope,
+ * so the statement will be removed only if all code code paths lead to a memory overwrite.
  *
  * Best run in SSA form.
  *
  * Prerequisite: Disambiguator, ForLoopInitRewriter.
  */
-class UnusedStoreEliminator: public UnusedStoreBase
+class UnusedStoreEliminator: public UnusedStoreBase<UnusedStoreEliminatorKey>
 {
 public:
 	static constexpr char const* name{"UnusedStoreEliminator"};
@@ -57,17 +62,11 @@ public:
 
 	explicit UnusedStoreEliminator(
 		Dialect const& _dialect,
-		std::map<YulString, SideEffects> const& _functionSideEffects,
-		std::map<YulString, ControlFlowSideEffects> _controlFlowSideEffects,
-		std::map<YulString, AssignedValue> const& _ssaValues,
+		std::map<FunctionHandle, SideEffects> const& _functionSideEffects,
+		std::map<YulName, ControlFlowSideEffects> _controlFlowSideEffects,
+		std::map<YulName, AssignedValue> const& _ssaValues,
 		bool _ignoreMemory
-	):
-		UnusedStoreBase(_dialect),
-		m_ignoreMemory(_ignoreMemory),
-		m_functionSideEffects(_functionSideEffects),
-		m_controlFlowSideEffects(_controlFlowSideEffects),
-		m_ssaValues(_ssaValues)
-	{}
+	);
 
 	using UnusedStoreBase::operator();
 	void operator()(FunctionCall const& _functionCall) override;
@@ -79,41 +78,57 @@ public:
 
 	using Location = evmasm::SemanticInformation::Location;
 	using Effect = evmasm::SemanticInformation::Effect;
+	using OperationLength = std::variant<YulName, u256>;
 	struct Operation
 	{
 		Location location;
 		Effect effect;
 		/// Start of affected area. Unknown if not provided.
-		std::optional<YulString> start;
+		std::optional<YulName> start;
 		/// Length of affected area, unknown if not provided.
 		/// Unused for storage.
-		std::optional<YulString> length;
+		std::optional<OperationLength> length;
 	};
 
 private:
-	void shortcutNestedLoop(TrackedStores const&) override
+	std::set<Statement const*>& activeMemoryStores() { return m_activeStores[UnusedStoreEliminatorKey::Memory]; }
+	std::set<Statement const*>& activeStorageStores() { return m_activeStores[UnusedStoreEliminatorKey::Storage]; }
+	std::optional<u256> lengthValue(OperationLength const& _length) const
+	{
+		if (YulName const* length = std::get_if<YulName>(&_length))
+			return m_knowledgeBase.valueIfKnownConstant(*length);
+		else
+			return std::get<u256>(_length);
+	}
+
+	void shortcutNestedLoop(ActiveStores const&) override
 	{
 		// We might only need to do this for newly introduced stores in the loop.
-		changeUndecidedTo(State::Used);
+		markActiveAsUsed();
 	}
-	void finalizeFunctionDefinition(FunctionDefinition const&) override;
+	void finalizeFunctionDefinition(FunctionDefinition const&) override
+	{
+		markActiveAsUsed();
+	}
 
 	std::vector<Operation> operationsFromFunctionCall(FunctionCall const& _functionCall) const;
 	void applyOperation(Operation const& _operation);
 	bool knownUnrelated(Operation const& _op1, Operation const& _op2) const;
 	bool knownCovered(Operation const& _covered, Operation const& _covering) const;
 
-	void changeUndecidedTo(State _newState, std::optional<Location> _onlyLocation = std::nullopt);
-	void scheduleUnusedForDeletion();
+	void markActiveAsUsed(std::optional<Location> _onlyLocation = std::nullopt);
+	void clearActive(std::optional<Location> _onlyLocation = std::nullopt);
 
-	std::optional<YulString> identifierNameIfSSA(Expression const& _expression) const;
+	std::optional<YulName> identifierNameIfSSA(Expression const& _expression) const;
 
 	bool const m_ignoreMemory;
-	std::map<YulString, SideEffects> const& m_functionSideEffects;
-	std::map<YulString, ControlFlowSideEffects> m_controlFlowSideEffects;
-	std::map<YulString, AssignedValue> const& m_ssaValues;
+	std::map<FunctionHandle, SideEffects> const& m_functionSideEffects;
+	std::map<YulName, ControlFlowSideEffects> m_controlFlowSideEffects;
+	std::map<YulName, AssignedValue> const& m_ssaValues;
 
 	std::map<Statement const*, Operation> m_storeOperations;
+
+	KnowledgeBase mutable m_knowledgeBase;
 };
 
 }

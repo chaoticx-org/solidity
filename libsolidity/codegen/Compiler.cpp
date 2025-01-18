@@ -26,16 +26,29 @@
 #include <libsolidity/codegen/ContractCompiler.h>
 #include <libevmasm/Assembly.h>
 
-using namespace std;
+#include <range/v3/algorithm/none_of.hpp>
+
 using namespace solidity;
 using namespace solidity::frontend;
 
 void Compiler::compileContract(
 	ContractDefinition const& _contract,
-	std::map<ContractDefinition const*, shared_ptr<Compiler const>> const& _otherCompilers,
+	std::map<ContractDefinition const*, std::shared_ptr<Compiler const>> const& _otherCompilers,
 	bytes const& _metadata
 )
 {
+	auto static isTransientReferenceType = [](VariableDeclaration const* _varDeclaration) {
+		solAssert(_varDeclaration && _varDeclaration->type());
+		return
+			_varDeclaration->referenceLocation() == VariableDeclaration::Location::Transient &&
+			!_varDeclaration->type()->isValueType();
+	};
+
+	solUnimplementedAssert(
+		ranges::none_of(_contract.stateVariables(), isTransientReferenceType),
+		"Transient storage reference type variables are not supported."
+	);
+
 	ContractCompiler runtimeCompiler(nullptr, m_runtimeContext, m_optimiserSettings);
 	runtimeCompiler.compileContract(_contract, _otherCompilers);
 	m_runtimeContext.appendToAuxiliaryData(_metadata);

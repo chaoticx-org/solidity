@@ -47,8 +47,9 @@ class TypeChecker: private ASTConstVisitor
 {
 public:
 	/// @param _errorReporter provides the error logging functionality.
-	TypeChecker(langutil::EVMVersion _evmVersion, langutil::ErrorReporter& _errorReporter):
+	TypeChecker(langutil::EVMVersion _evmVersion, std::optional<uint8_t> _eofVersion, langutil::ErrorReporter& _errorReporter):
 		m_evmVersion(_evmVersion),
+		m_eofVersion(_eofVersion),
 		m_errorReporter(_errorReporter)
 	{}
 
@@ -56,20 +57,11 @@ public:
 	/// @returns true iff all checks passed. Note even if all checks passed, errors() can still contain warnings
 	bool checkTypeRequirements(SourceUnit const& _source);
 
-	/// @returns the type of an expression and asserts that it is present.
-	Type const* type(Expression const& _expression) const;
-	/// @returns the type of the given variable and throws if the type is not present
-	/// (this can happen for variables with non-explicit types before their types are resolved)
-	Type const* type(VariableDeclaration const& _variable) const;
-
 	static bool typeSupportedByOldABIEncoder(Type const& _type, bool _isLibraryCall);
 
 private:
 
 	bool visit(ContractDefinition const& _contract) override;
-	/// Checks (and warns) if a tuple assignment might cause unexpected overwrites in storage.
-	/// Should only be called if the left hand side is tuple-typed.
-	void checkDoubleStorageAssignment(Assignment const& _assignment);
 	// Checks whether the expression @arg _expression can be assigned from type @arg _type
 	// and reports an error, if not.
 	void checkExpressionAssignment(Type const& _type, Expression const& _expression);
@@ -183,7 +175,7 @@ private:
 	/// convertible to @a _expectedType.
 	bool expectType(Expression const& _expression, Type const& _expectedType);
 	/// Runs type checks on @a _expression to infer its type and then checks that it is an LValue.
-	void requireLValue(Expression const& _expression, bool _ordinaryAssignment);
+	void requireLValue(Expression const& _expression);
 
 	bool useABICoderV2() const;
 
@@ -201,6 +193,7 @@ private:
 	ContractDefinition const* m_currentContract = nullptr;
 
 	langutil::EVMVersion m_evmVersion;
+	std::optional<uint8_t> m_eofVersion;
 
 	langutil::ErrorReporter& m_errorReporter;
 };

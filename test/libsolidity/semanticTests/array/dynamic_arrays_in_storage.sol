@@ -38,13 +38,12 @@ contract c {
         while (ids.length < l2) ids.push();
     }
 }
-
 // ----
 // getLengths() -> 0, 0
 // setLengths(uint256,uint256): 48, 49 ->
-// gas irOptimized: 111450
-// gas legacy: 108571
-// gas legacyOptimized: 100417
+// gas irOptimized: 112674
+// gas legacy: 108272
+// gas legacyOptimized: 100268
 // getLengths() -> 48, 49
 // setIDStatic(uint256): 11 ->
 // getID(uint256): 2 -> 11

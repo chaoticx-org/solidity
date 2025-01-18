@@ -1,5 +1,10 @@
 ---
 name: Bug Report
+about: Problems, deficiencies, inaccuracies or crashes discovered on Solidity.
+title: ''
+labels: 'bug :bug:'
+assignees: ''
+
 ---
 
 <!--## Prerequisites
@@ -11,8 +16,6 @@ name: Bug Report
     - [Stack Overflow](https://ethereum.stackexchange.com/)
 - Ensure the issue isn't already reported.
 - The issue should be reproducible with the latest solidity version; however, this isn't a hard requirement and being reproducible with an older version is sufficient.
-
-*Delete the above section and the instructions in the sections below before submitting*
 -->
 
 ## Description
@@ -22,8 +25,9 @@ name: Bug Report
 ## Environment
 
 - Compiler version:
+- Compilation pipeline (legacy, IR, EOF):
 - Target EVM version (as per compiler settings):
-- Framework/IDE (e.g. Truffle or Remix):
+- Framework/IDE (e.g. Foundry, Hardhat, Remix):
 - EVM execution environment / backend / blockchain client:
 - Operating system:
 
@@ -31,7 +35,7 @@ name: Bug Report
 
 <!--
 Please provide a *minimal* source code example to trigger the bug you have found.
-Please also mention any command line flags that are necessary for triggering the bug.
+Please also mention any command-line flags that are necessary for triggering the bug.
 Provide as much information as necessary to reproduce the bug.
 
 ```solidity

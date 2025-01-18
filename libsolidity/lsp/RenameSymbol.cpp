@@ -29,7 +29,6 @@
 using namespace solidity::frontend;
 using namespace solidity::langutil;
 using namespace solidity::lsp;
-using namespace std;
 
 namespace
 {
@@ -48,11 +47,11 @@ CallableDeclaration const* extractCallableDeclaration(FunctionCall const& _funct
 
 }
 
-void RenameSymbol::operator()(MessageID _id, Json::Value const& _args)
+void RenameSymbol::operator()(MessageID _id, Json const& _args)
 {
 	auto const&& [sourceUnitName, lineColumn] = extractSourceUnitNameAndLineColumn(_args);
-	string const newName = _args["newName"].asString();
-	string const uri = _args["textDocument"]["uri"].asString();
+	std::string const newName = _args["newName"].get<std::string>();
+	std::string const uri = _args["textDocument"]["uri"].get<std::string>();
 
 	ASTNode const* sourceNode = m_server.astNodeAtSourceLocation(sourceUnitName, lineColumn);
 
@@ -61,7 +60,7 @@ void RenameSymbol::operator()(MessageID _id, Json::Value const& _args)
 	m_sourceUnits = { &m_server.compilerStack().ast(sourceUnitName) };
 	m_locations.clear();
 
-	optional<int> cursorBytePosition = charStreamProvider()
+	std::optional<int> cursorBytePosition = charStreamProvider()
 		.charStream(sourceUnitName)
 		.translateLineColumnToPosition(lineColumn);
 	solAssert(cursorBytePosition.has_value(), "Expected source pos");
@@ -72,7 +71,7 @@ void RenameSymbol::operator()(MessageID _id, Json::Value const& _args)
 	for (auto const& [name, content]: fileRepository().sourceUnits())
 	{
 		auto const& sourceUnit = m_server.compilerStack().ast(name);
-		for (auto const* referencedSourceUnit: sourceUnit.referencedSourceUnits(true, util::convertContainer<set<SourceUnit const*>>(m_sourceUnits)))
+		for (auto const* referencedSourceUnit: sourceUnit.referencedSourceUnits(true, util::convertContainer<std::set<SourceUnit const*>>(m_sourceUnits)))
 			if (*referencedSourceUnit->location().sourceName == sourceUnitName)
 			{
 				m_sourceUnits.insert(&sourceUnit);
@@ -91,31 +90,31 @@ void RenameSymbol::operator()(MessageID _id, Json::Value const& _args)
 	// Apply changes in reverse order (will iterate in reverse)
 	sort(m_locations.begin(), m_locations.end());
 
-	Json::Value reply = Json::objectValue;
-	reply["changes"] = Json::objectValue;
+	Json reply;
+	reply["changes"] = Json::object();
 
-	Json::Value edits = Json::arrayValue;
+	Json edits = Json::array();
 
 	for (auto i = m_locations.rbegin(); i != m_locations.rend(); i++)
 	{
 		solAssert(i->isValid());
 
 		// Replace in our file repository
-		string const uri = fileRepository().sourceUnitNameToUri(*i->sourceName);
-		string buffer = fileRepository().sourceUnits().at(*i->sourceName);
+		std::string const uri = fileRepository().sourceUnitNameToUri(*i->sourceName);
+		std::string buffer = fileRepository().sourceUnits().at(*i->sourceName);
 		buffer.replace((size_t)i->start, (size_t)(i->end - i->start), newName);
 		fileRepository().setSourceByUri(uri, std::move(buffer));
 
-		Json::Value edit = Json::objectValue;
+		Json edit;
 		edit["range"] = toRange(*i);
 		edit["newText"] = newName;
 
 		// Record changes for the client
-		edits.append(edit);
+		edits.emplace_back(edit);
 		if (i + 1 == m_locations.rend() || (i + 1)->sourceName != i->sourceName)
 		{
 			reply["changes"][uri] = edits;
-			edits = Json::arrayValue;
+			edits = Json::array(); // Reset.
 		}
 	}
 
@@ -155,7 +154,7 @@ void RenameSymbol::extractNameAndDeclaration(ASTNode const& _node, int _cursorBy
 	else if (auto const* inlineAssembly = dynamic_cast<InlineAssembly const*>(&_node))
 		extractNameAndDeclaration(*inlineAssembly, _cursorBytePosition);
 	else
-		solAssert(false, "Unexpected ASTNODE id: " + to_string(_node.id()));
+		solAssert(false, "Unexpected ASTNODE id: " + std::to_string(_node.id()));
 
 	lspDebug(fmt::format("Goal: rename '{}', loc: {}-{}", m_symbolName, m_declarationToRename->nameLocation().start, m_declarationToRename->nameLocation().end));
 }
@@ -297,7 +296,7 @@ void RenameSymbol::Visitor::endVisit(InlineAssembly const& _node)
 {
 	for (auto&& [identifier, externalReference]: _node.annotation().externalReferences)
 	{
-		string identifierName = identifier->name.str();
+		std::string identifierName = identifier->name.str();
 		if (!externalReference.suffix.empty())
 			identifierName = identifierName.substr(0, identifierName.length() - externalReference.suffix.size() - 1);
 

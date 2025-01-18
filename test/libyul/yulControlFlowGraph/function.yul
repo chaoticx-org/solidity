@@ -28,10 +28,9 @@
 // Block0 [label="\
 // i: [ RET[i] ] => [ TMP[i, 0] TMP[i, 1] ]\l\
 // Assignment(x, y): [ TMP[i, 0] TMP[i, 1] ] => [ x y ]\l\
-// h: [ RET[h] x ] => [ ]\l\
-// h: [ RET[h] y ] => [ ]\l\
+// h: [ x ] => [ ]\l\
 // "];
-// Block0Exit [label="MainExit"];
+// Block0Exit [label="Terminated"];
 // Block0 -> Block0Exit;
 //
 // FunctionEntry_f_1 [label="function f(a, b) -> r"];
@@ -45,31 +44,22 @@
 // Block1Exit [label="FunctionReturn[f]"];
 // Block1 -> Block1Exit;
 //
-// FunctionEntry_g_2 [label="function g()"];
-// FunctionEntry_g_2 -> Block2;
+// FunctionEntry_h_2 [label="function h(x)"];
+// FunctionEntry_h_2 -> Block2;
 // Block2 [label="\
-// sstore: [ 0x0101 0x01 ] => [ ]\l\
+// f: [ RET[f] 0x00 x ] => [ TMP[f, 0] ]\l\
+// h: [ TMP[f, 0] ] => [ ]\l\
 // "];
-// Block2Exit [label="FunctionReturn[g]"];
+// Block2Exit [label="Terminated"];
 // Block2 -> Block2Exit;
 //
-// FunctionEntry_h_3 [label="function h(x)"];
-// FunctionEntry_h_3 -> Block3;
+// FunctionEntry_i_3 [label="function i() -> v, w"];
+// FunctionEntry_i_3 -> Block3;
 // Block3 [label="\
-// f: [ RET[f] 0x00 x ] => [ TMP[f, 0] ]\l\
-// h: [ RET[h] TMP[f, 0] ] => [ ]\l\
-// g: [ RET[g] ] => [ ]\l\
-// "];
-// Block3Exit [label="FunctionReturn[h]"];
-// Block3 -> Block3Exit;
-//
-// FunctionEntry_i_4 [label="function i() -> v, w"];
-// FunctionEntry_i_4 -> Block4;
-// Block4 [label="\
 // Assignment(v): [ 0x0202 ] => [ v ]\l\
 // Assignment(w): [ 0x0303 ] => [ w ]\l\
 // "];
-// Block4Exit [label="FunctionReturn[i]"];
-// Block4 -> Block4Exit;
+// Block3Exit [label="FunctionReturn[i]"];
+// Block3 -> Block3Exit;
 //
 // }

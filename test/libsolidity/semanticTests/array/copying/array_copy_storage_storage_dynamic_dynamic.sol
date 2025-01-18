@@ -15,9 +15,8 @@ contract c {
         y = data2[4];
     }
 }
-
 // ----
 // test() -> 5, 4
-// gas irOptimized: 272950
-// gas legacy: 270834
-// gas legacyOptimized: 269960
+// gas irOptimized: 253591
+// gas legacy: 250892
+// gas legacyOptimized: 250045

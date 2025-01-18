@@ -37,12 +37,14 @@ contract Main {
         them = address(h).balance;
     }
 }
-
 // ----
 // constructor(), 22 wei ->
-// gas irOptimized: 268544
-// gas legacy: 402045
-// gas legacyOptimized: 266772
+// gas irOptimized: 143864
+// gas irOptimized code: 118000
+// gas legacy: 156599
+// gas legacy code: 236400
+// gas legacyOptimized: 143592
+// gas legacyOptimized code: 118000
 // getFlag() -> true
 // getName() -> "abc"
 // getBalances() -> 12, 10

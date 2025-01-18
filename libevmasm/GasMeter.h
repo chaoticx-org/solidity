@@ -43,32 +43,34 @@ class KnownState;
 
 namespace GasCosts
 {
+	/// NOTE: The GAS_... constants referenced by comments are defined for each EVM version in the Execution Specs:
+	/// https://ethereum.github.io/execution-specs/autoapi/ethereum/<evm version>/vm/gas/index.html
+
 	static unsigned const stackLimit = 1024;
-	static unsigned const tier0Gas = 0;
-	static unsigned const tier1Gas = 2;
-	static unsigned const tier2Gas = 3;
-	static unsigned const tier3Gas = 5;
-	static unsigned const tier4Gas = 8;
-	static unsigned const tier5Gas = 10;
-	static unsigned const tier6Gas = 20;
-	static unsigned const tier7Gas = 0;
-	static unsigned const expGas = 10;
+	static unsigned const tier0Gas = 0;                       // GAS_ZERO (in Execution Specs)
+	static unsigned const tier1Gas = 2;                       // GAS_BASE
+	static unsigned const tier2Gas = 3;                       // GAS_VERY_LOW
+	static unsigned const tier3Gas = 5;                       // GAS_LOW / GAS_FAST_STEP
+	static unsigned const tier4Gas = 8;                       // GAS_MID
+	static unsigned const tier5Gas = 10;                      // GAS_HIGH
+	static unsigned const tier6Gas = 20;                      // GAS_BLOCK_HASH
+	static unsigned const expGas = 10;                        // GAS_EXPONENTIATION
 	inline unsigned expByteGas(langutil::EVMVersion _evmVersion)
 	{
-		return _evmVersion >= langutil::EVMVersion::spuriousDragon() ? 50 : 10;
+		return _evmVersion >= langutil::EVMVersion::spuriousDragon() ? 50 : 10; // GAS_EXPONENTIATION_PER_BYTE
 	}
-	static unsigned const keccak256Gas = 30;
-	static unsigned const keccak256WordGas = 6;
+	static unsigned const keccak256Gas = 30;                  // GAS_KECCAK256
+	static unsigned const keccak256WordGas = 6;               // GAS_KECCAK256_WORD
 	/// Corresponds to ACCESS_LIST_ADDRESS_COST from EIP-2930
 	static unsigned const accessListAddressCost = 2400;
 	/// Corresponds to ACCESS_LIST_STORAGE_COST from EIP-2930
 	static unsigned const accessListStorageKeyCost = 1900;
 	/// Corresponds to COLD_SLOAD_COST from EIP-2929
-	static unsigned const coldSloadCost = 2100;
+	static unsigned const coldSloadCost = 2100;               // GAS_COLD_SLOAD
 	/// Corresponds to COLD_ACCOUNT_ACCESS_COST from EIP-2929
-	static unsigned const coldAccountAccessCost = 2600;
+	static unsigned const coldAccountAccessCost = 2600;       // GAS_COLD_ACCOUNT_ACCESS
 	/// Corresponds to WARM_STORAGE_READ_COST from EIP-2929
-	static unsigned const warmStorageReadCost = 100;
+	static unsigned const warmStorageReadCost = 100;          // GAS_WARM_ACCESS
 	inline unsigned sloadGas(langutil::EVMVersion _evmVersion)
 	{
 		if (_evmVersion >= langutil::EVMVersion::berlin())
@@ -81,7 +83,7 @@ namespace GasCosts
 			return 50;
 	}
 	/// Corresponds to SSTORE_SET_GAS
-	static unsigned const sstoreSetGas = 20000;
+	static unsigned const sstoreSetGas = 20000;               // GAS_STORAGE_SET
 	/// Corresponds to SSTORE_RESET_GAS from EIP-2929
 	static unsigned const sstoreResetGas = 5000 - coldSloadCost;
 	/// Corresponds to SSTORE_CLEARS_SCHEDULE from EIP-2200
@@ -130,11 +132,11 @@ namespace GasCosts
 		else
 			return 20;
 	}
-	static unsigned const jumpdestGas = 1;
-	static unsigned const logGas = 375;
-	static unsigned const logDataGas = 8;
-	static unsigned const logTopicGas = 375;
-	static unsigned const createGas = 32000;
+	static unsigned const jumpdestGas = 1;                    // GAS_JUMPDEST
+	static unsigned const logGas = 375;                       // GAS_LOG
+	static unsigned const logDataGas = 8;                     // GAS_LOG_DATA
+	static unsigned const logTopicGas = 375;                  // GAS_LOG_TOPIC
+	static unsigned const createGas = 32000;                  // GAS_CREATE
 	inline unsigned callGas(langutil::EVMVersion _evmVersion)
 	{
 		if (_evmVersion >= langutil::EVMVersion::berlin())
@@ -144,10 +146,10 @@ namespace GasCosts
 		else
 			return 40;
 	}
-	static unsigned const callStipend = 2300;
-	static unsigned const callValueTransferGas = 9000;
-	static unsigned const callNewAccountGas = 25000;
-	inline unsigned selfdestructGas(langutil::EVMVersion _evmVersion)
+	static unsigned const callStipend = 2300;                  // GAS_CALL_STIPEND
+	static unsigned const callValueTransferGas = 9000;         // GAS_CALL_VALUE
+	static unsigned const callNewAccountGas = 25000;           // GAS_NEW_ACCOUNT / GAS_SELF_DESTRUCT_NEW_ACCOUNT
+	inline unsigned selfdestructGas(langutil::EVMVersion _evmVersion) // GAS_SELF_DESTRUCT
 	{
 		if (_evmVersion >= langutil::EVMVersion::berlin())
 			return coldAccountAccessCost;
@@ -164,9 +166,9 @@ namespace GasCosts
 		else
 			return 24000;
 	}
-	static unsigned const memoryGas = 3;
+	static unsigned const memoryGas = 3;                       // GAS_MEMORY / GAS_COPY / GAS_RETURN_DATA_COPY
 	static unsigned const quadCoeffDiv = 512;
-	static unsigned const createDataGas = 200;
+	static unsigned const createDataGas = 200;                 // GAS_CODE_DEPOSIT
 	static unsigned const txGas = 21000;
 	static unsigned const txCreateGas = 53000;
 	static unsigned const txDataZeroGas = 4;
@@ -175,6 +177,7 @@ namespace GasCosts
 		return _evmVersion >= langutil::EVMVersion::istanbul() ? 16 : 68;
 	}
 	static unsigned const copyGas = 3;
+	static unsigned const rjumpiGas = 4;
 }
 
 /**
@@ -214,14 +217,17 @@ public:
 
 	/// @returns an upper bound on the gas consumed by the given instruction and updates
 	/// the state.
-	/// @param _inculdeExternalCosts if true, include costs caused by other contracts in calls.
+	/// @param _includeExternalCosts if true, include costs caused by other contracts in calls.
 	GasConsumption estimateMax(AssemblyItem const& _item, bool _includeExternalCosts = true);
 
 	u256 const& largestMemoryAccess() const { return m_largestMemoryAccess; }
 
 	/// @returns gas costs for simple instructions with constant gas costs (that do not
 	/// change with EVM versions)
-	static unsigned runGas(Instruction _instruction);
+	static unsigned runGas(Instruction _instruction, langutil::EVMVersion _evmVersion);
+
+	/// @returns gas costs for push instructions (may change depending on EVM version)
+	static unsigned pushGas(u256 _value, langutil::EVMVersion _evmVersion);
 
 	/// @returns the gas cost of the supplied data, depending whether it is in creation code, or not.
 	/// In case of @a _inCreation, the data is only sent as a transaction and is not stored, whereas
@@ -256,6 +262,5 @@ inline std::ostream& operator<<(std::ostream& _str, GasMeter::GasConsumption con
 	else
 		return _str << std::dec << _consumption.value;
 }
-
 
 }

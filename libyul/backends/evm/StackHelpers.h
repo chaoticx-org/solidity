@@ -20,6 +20,7 @@
 
 #include <libyul/backends/evm/ControlFlowGraph.h>
 #include <libyul/Exceptions.h>
+#include <libyul/Utilities.h>
 
 #include <libsolutil/Visitor.h>
 
@@ -33,23 +34,23 @@
 namespace solidity::yul
 {
 
-inline std::string stackSlotToString(StackSlot const& _slot)
+inline std::string stackSlotToString(StackSlot const& _slot, Dialect const& _dialect)
 {
 	return std::visit(util::GenericVisitor{
-		[](FunctionCallReturnLabelSlot const& _ret) -> std::string { return "RET[" + _ret.call.get().functionName.name.str() + "]"; },
+		[&](FunctionCallReturnLabelSlot const& _ret) -> std::string { return "RET[" + std::string(resolveFunctionName(_ret.call.get().functionName, _dialect)) + "]"; },
 		[](FunctionReturnLabelSlot const&) -> std::string { return "RET"; },
 		[](VariableSlot const& _var) { return _var.variable.get().name.str(); },
 		[](LiteralSlot const& _lit) { return toCompactHexWithPrefix(_lit.value); },
-		[](TemporarySlot const& _tmp) -> std::string { return "TMP[" + _tmp.call.get().functionName.name.str() + ", " + std::to_string(_tmp.index) + "]"; },
+		[&](TemporarySlot const& _tmp) -> std::string { return "TMP[" + std::string(resolveFunctionName(_tmp.call.get().functionName, _dialect)) + ", " + std::to_string(_tmp.index) + "]"; },
 		[](JunkSlot const&) -> std::string { return "JUNK"; }
 	}, _slot);
 }
 
-inline std::string stackToString(Stack const& _stack)
+inline std::string stackToString(Stack const& _stack, Dialect const& _dialect)
 {
 	std::string result("[ ");
 	for (auto const& slot: _stack)
-		result += stackSlotToString(slot) + ' ';
+		result += stackSlotToString(slot, _dialect) + ' ';
 	result += ']';
 	return result;
 }
@@ -377,6 +378,50 @@ private:
 	}
 };
 
+/// A simple optimized map for mapping StackSlots to ints.
+class Multiplicity
+{
+public:
+	int& operator[](StackSlot const& _slot)
+	{
+		if (auto* p = std::get_if<FunctionCallReturnLabelSlot>(&_slot))
+			return m_functionCallReturnLabelSlotMultiplicity[*p];
+		if (std::holds_alternative<FunctionReturnLabelSlot>(_slot))
+			return m_functionReturnLabelSlotMultiplicity;
+		if (auto* p = std::get_if<VariableSlot>(&_slot))
+			return m_variableSlotMultiplicity[*p];
+		if (auto* p = std::get_if<LiteralSlot>(&_slot))
+			return m_literalSlotMultiplicity[*p];
+		if (auto* p = std::get_if<TemporarySlot>(&_slot))
+			return m_temporarySlotMultiplicity[*p];
+		yulAssert(std::holds_alternative<JunkSlot>(_slot));
+		return m_junkSlotMultiplicity;
+	}
+
+	int at(StackSlot const& _slot) const
+	{
+		if (auto* p = std::get_if<FunctionCallReturnLabelSlot>(&_slot))
+			return m_functionCallReturnLabelSlotMultiplicity.at(*p);
+		if (std::holds_alternative<FunctionReturnLabelSlot>(_slot))
+			return m_functionReturnLabelSlotMultiplicity;
+		if (auto* p = std::get_if<VariableSlot>(&_slot))
+			return m_variableSlotMultiplicity.at(*p);
+		if (auto* p = std::get_if<LiteralSlot>(&_slot))
+			return m_literalSlotMultiplicity.at(*p);
+		if (auto* p = std::get_if<TemporarySlot>(&_slot))
+			return m_temporarySlotMultiplicity.at(*p);
+		yulAssert(std::holds_alternative<JunkSlot>(_slot));
+		return m_junkSlotMultiplicity;
+	}
+
+private:
+	std::map<FunctionCallReturnLabelSlot, int> m_functionCallReturnLabelSlotMultiplicity;
+	int m_functionReturnLabelSlotMultiplicity = 0;
+	std::map<VariableSlot, int> m_variableSlotMultiplicity;
+	std::map<LiteralSlot, int> m_literalSlotMultiplicity;
+	std::map<TemporarySlot, int> m_temporarySlotMultiplicity;
+	int m_junkSlotMultiplicity = 0;
+};
 
 /// Transforms @a _currentStack to @a _targetStack, invoking the provided shuffling operations.
 /// Modifies @a _currentStack itself after each invocation of the shuffling operations.
@@ -395,7 +440,7 @@ void createStackLayout(Stack& _currentStack, Stack const& _targetStack, Swap _sw
 		Swap swapCallback;
 		PushOrDup pushOrDupCallback;
 		Pop popCallback;
-		std::map<StackSlot, int> multiplicity;
+		Multiplicity multiplicity;
 		ShuffleOperations(
 			Stack& _currentStack,
 			Stack const& _targetStack,

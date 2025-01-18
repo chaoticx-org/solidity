@@ -40,7 +40,7 @@ The comment is recognized by the compiler anywhere in the file at the
 file level, but it is recommended to put it at the top of the file.
 
 More information about how to use SPDX license identifiers
-can be found at the `SPDX website <https://spdx.org/ids-how>`_.
+can be found at the `SPDX website <https://spdx.dev/learn/handling-license-info/#how>`_.
 
 
 .. index:: ! pragma
@@ -105,7 +105,7 @@ arrays and structs. Apart from supporting more types, it involves more extensive
 validation and safety checks, which may result in higher gas costs, but also heightened
 security. It is considered
 non-experimental as of Solidity 0.6.0 and it is enabled by default starting
-with Solidity 0.8.0. There old coder can still be selected using ``pragma abicoder v1;``.
+with Solidity 0.8.0. The old ABI coder can still be selected using ``pragma abicoder v1;``.
 
 The set of types supported by the new encoder is a strict superset of
 the ones supported by the old one. Contracts that use it can interact with ones
@@ -182,7 +182,7 @@ Syntax and Semantics
 Solidity supports import statements to help modularise your code that
 are similar to those available in JavaScript
 (from ES6 on). However, Solidity does not support the concept of
-a `default export <https://developer.mozilla.org/en-US/docs/web/javascript/reference/statements/export#Description>`_.
+a `default export <https://developer.mozilla.org/en-US/docs/web/javascript/reference/statements/export#description>`_.
 
 At a global level, you can use import statements of the following form:
 

@@ -1,16 +1,13 @@
 {
   "absolutePath": "a",
-  "exportedSymbols":
-  {
-    "C":
-    [
+  "exportedSymbols": {
+    "C": [
       1
     ]
   },
   "id": 2,
   "nodeType": "SourceUnit",
-  "nodes":
-  [
+  "nodes": [
     {
       "abstract": false,
       "baseContracts": [],
@@ -19,8 +16,7 @@
       "contractKind": "contract",
       "fullyImplemented": true,
       "id": 1,
-      "linearizedBaseContracts":
-      [
+      "linearizedBaseContracts": [
         1
       ],
       "name": "C",
@@ -29,7 +25,8 @@
       "nodes": [],
       "scope": 2,
       "src": "0:13:1",
-      "usedErrors": []
+      "usedErrors": [],
+      "usedEvents": []
     }
   ],
   "src": "0:14:1"

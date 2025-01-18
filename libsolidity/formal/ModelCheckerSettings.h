@@ -113,7 +113,7 @@ struct ModelCheckerInvariants
 	std::set<InvariantType> invariants;
 };
 
-enum class VerificationTargetType { ConstantCondition, Underflow, Overflow, UnderOverflow, DivByZero, Balance, Assert, PopEmptyArray, OutOfBounds };
+enum class VerificationTargetType { ConstantCondition, Underflow, Overflow, DivByZero, Balance, Assert, PopEmptyArray, OutOfBounds };
 
 struct ModelCheckerTargets
 {
@@ -140,8 +140,24 @@ struct ModelCheckerTargets
 	std::set<VerificationTargetType> targets;
 };
 
+struct ModelCheckerExtCalls
+{
+	enum class Mode
+	{
+		UNTRUSTED,
+		TRUSTED
+	};
+
+	Mode mode = Mode::UNTRUSTED;
+
+	static std::optional<ModelCheckerExtCalls> fromString(std::string const& _mode);
+
+	bool isTrusted() const { return mode == Mode::TRUSTED; }
+};
+
 struct ModelCheckerSettings
 {
+	std::optional<unsigned> bmcLoopIterations;
 	ModelCheckerContracts contracts = ModelCheckerContracts::Default();
 	/// Currently division and modulo are replaced by multiplication with slack vars, such that
 	/// a / b <=> a = b * k + m
@@ -151,21 +167,30 @@ struct ModelCheckerSettings
 	/// might prefer the precise encoding.
 	bool divModNoSlacks = false;
 	ModelCheckerEngine engine = ModelCheckerEngine::None();
+	ModelCheckerExtCalls externalCalls = {};
 	ModelCheckerInvariants invariants = ModelCheckerInvariants::Default();
+	bool printQuery = false;
+	bool showProvedSafe = false;
 	bool showUnproved = false;
-	smtutil::SMTSolverChoice solvers = smtutil::SMTSolverChoice::All();
+	bool showUnsupported = false;
+	smtutil::SMTSolverChoice solvers = smtutil::SMTSolverChoice::Z3();
 	ModelCheckerTargets targets = ModelCheckerTargets::Default();
-	std::optional<unsigned> timeout;
+	std::optional<unsigned> timeout; // in milliseconds
 
 	bool operator!=(ModelCheckerSettings const& _other) const noexcept { return !(*this == _other); }
 	bool operator==(ModelCheckerSettings const& _other) const noexcept
 	{
 		return
+			bmcLoopIterations == _other.bmcLoopIterations &&
 			contracts == _other.contracts &&
 			divModNoSlacks == _other.divModNoSlacks &&
 			engine == _other.engine &&
+			externalCalls.mode == _other.externalCalls.mode &&
 			invariants == _other.invariants &&
+			printQuery == _other.printQuery &&
+			showProvedSafe == _other.showProvedSafe &&
 			showUnproved == _other.showUnproved &&
+			showUnsupported == _other.showUnsupported &&
 			solvers == _other.solvers &&
 			targets == _other.targets &&
 			timeout == _other.timeout;

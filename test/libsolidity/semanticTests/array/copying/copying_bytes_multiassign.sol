@@ -16,13 +16,11 @@ contract sender {
     bytes savedData1;
     bytes savedData2;
 }
-// ====
-// compileToEwasm: false
 // ----
 // (): 7 ->
-// gas irOptimized: 110826
-// gas legacy: 111408
-// gas legacyOptimized: 111078
+// gas irOptimized: 110822
+// gas legacy: 111388
+// gas legacyOptimized: 111065
 // val() -> 0
 // forward(bool): true -> true
 // val() -> 0x80

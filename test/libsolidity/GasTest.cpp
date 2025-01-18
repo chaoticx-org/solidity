@@ -17,10 +17,11 @@
 // SPDX-License-Identifier: GPL-3.0
 
 #include <test/libsolidity/GasTest.h>
+#include <test/libsolidity/util/Common.h>
 #include <test/Common.h>
 #include <libsolutil/CommonIO.h>
 #include <libsolutil/JSON.h>
-#include <liblangutil/SourceReferenceFormatter.h>
+#include <libsolutil/StringUtils.h>
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/filesystem.hpp>
@@ -33,11 +34,10 @@ using namespace solidity::langutil;
 using namespace solidity::frontend;
 using namespace solidity::frontend::test;
 using namespace solidity;
-using namespace std;
 using namespace boost::unit_test;
 
-GasTest::GasTest(string const& _filename):
-	TestCase(_filename)
+GasTest::GasTest(std::string const& _filename):
+	EVMVersionRestrictedTestCase(_filename)
 {
 	m_source = m_reader.source();
 	m_optimise = m_reader.boolSetting("optimize", false);
@@ -48,20 +48,20 @@ GasTest::GasTest(string const& _filename):
 
 void GasTest::parseExpectations(std::istream& _stream)
 {
-	map<std::string, std::string>* currentKind = nullptr;
-	string line;
+	std::map<std::string, std::string>* currentKind = nullptr;
+	std::string line;
 
 	while (getline(_stream, line))
 		if (!boost::starts_with(line, "// "))
-			BOOST_THROW_EXCEPTION(runtime_error("Invalid expectation: expected \"// \"."));
+			BOOST_THROW_EXCEPTION(std::runtime_error("Invalid expectation: expected \"// \"."));
 		else if (boost::ends_with(line, ":"))
 		{
-			string kind = line.substr(3, line.length() - 4);
+			std::string kind = line.substr(3, line.length() - 4);
 			boost::trim(kind);
-			currentKind = &m_expectations[move(kind)];
+			currentKind = &m_expectations[std::move(kind)];
 		}
 		else if (!currentKind)
-			BOOST_THROW_EXCEPTION(runtime_error("No function kind specified. Expected \"creation:\", \"external:\" or \"internal:\"."));
+			BOOST_THROW_EXCEPTION(std::runtime_error("No function kind specified. Expected \"creation:\", \"external:\" or \"internal:\"."));
 		else
 		{
 			auto it = line.begin() + 3;
@@ -69,43 +69,43 @@ void GasTest::parseExpectations(std::istream& _stream)
 			auto functionNameBegin = it;
 			while (it != line.end() && *it != ':')
 				++it;
-			string functionName(functionNameBegin, it);
+			std::string functionName(functionNameBegin, it);
 			if (functionName == "fallback")
 				functionName.clear();
 			expect(it, line.end(), ':');
 			skipWhitespace(it, line.end());
 			if (it == line.end())
-				BOOST_THROW_EXCEPTION(runtime_error("Invalid expectation: expected gas cost."));
+				BOOST_THROW_EXCEPTION(std::runtime_error("Invalid expectation: expected gas cost."));
 			(*currentKind)[functionName] = std::string(it, line.end());
 		}
 }
 
-void GasTest::printUpdatedExpectations(ostream& _stream, string const& _linePrefix) const
+void GasTest::printUpdatedExpectations(std::ostream& _stream, std::string const& _linePrefix) const
 {
-	Json::Value estimates = compiler().gasEstimates(compiler().lastContractName());
-	for (auto groupIt = estimates.begin(); groupIt != estimates.end(); ++groupIt)
+	Json estimates = compiler().gasEstimates(compiler().lastContractName());
+	for (auto& [key, group] : estimates.items())
 	{
-		_stream << _linePrefix << groupIt.key().asString() << ":" << std::endl;
-		for (auto it = groupIt->begin(); it != groupIt->end(); ++it)
+		_stream << _linePrefix << key << ":" << std::endl;
+		for (auto& [elementKey, value] : group.items())
 		{
 			_stream << _linePrefix << "  ";
-			if (it.key().asString().empty())
+			if (elementKey.empty())
 				_stream << "fallback";
 			else
-				_stream << it.key().asString();
-			_stream << ": " << it->asString() << std::endl;
+				_stream << elementKey;
+			_stream << ": " << value.get<std::string>() << std::endl;
 		}
 	}
 }
 
-TestCase::TestResult GasTest::run(ostream& _stream, string const& _linePrefix, bool _formatted)
+void GasTest::setupCompiler(CompilerStack& _compiler)
 {
-	string const preamble = "pragma solidity >=0.0;\n// SPDX-License-Identifier: GPL-3.0\n";
-	compiler().reset();
+	AnalysisFramework::setupCompiler(_compiler);
+
 	// Prerelease CBOR metadata varies in size due to changing version numbers and build dates.
 	// This leads to volatile creation cost estimates. Therefore we force the compiler to
 	// release mode for testing gas estimates.
-	compiler().setMetadataFormat(CompilerStack::MetadataFormat::NoMetadata);
+	_compiler.setMetadataFormat(CompilerStack::MetadataFormat::NoMetadata);
 	OptimiserSettings settings = m_optimise ? OptimiserSettings::standard() : OptimiserSettings::minimal();
 	if (m_optimiseYul)
 	{
@@ -113,24 +113,25 @@ TestCase::TestResult GasTest::run(ostream& _stream, string const& _linePrefix, b
 		settings.optimizeStackAllocation = m_optimise;
 	}
 	settings.expectedExecutionsPerDeployment = m_optimiseRuns;
-	compiler().setOptimiserSettings(settings);
-	compiler().setSources({{"", preamble + m_source}});
+	_compiler.setOptimiserSettings(settings);
+}
 
-	if (!compiler().parseAndAnalyze() || !compiler().compile())
+TestCase::TestResult GasTest::run(std::ostream& _stream, std::string const& _linePrefix, bool _formatted)
+{
+	if (!runFramework(withPreamble(m_source), PipelineStage::Compilation))
 	{
-		SourceReferenceFormatter{_stream, compiler(), _formatted, false}
-			.printErrorInformation(compiler().errors());
+		util::printPrefixed(_stream, formatErrors(filteredErrors(), _formatted), _linePrefix);
 		return TestResult::FatalError;
 	}
 
-	Json::Value estimateGroups = compiler().gasEstimates(compiler().lastContractName());
+	Json estimateGroups = compiler().gasEstimates(compiler().lastContractName());
 	if (
 		m_expectations.size() == estimateGroups.size() &&
 		boost::all(m_expectations, [&](auto const& expectations) {
 		auto const& estimates = estimateGroups[expectations.first];
 		return estimates.size() == expectations.second.size() &&
 			boost::all(expectations.second, [&](auto const& entry) {
-				return entry.second == estimates[entry.first].asString();
+				return entry.second == estimates[entry.first].template get<std::string>();
 			});
 		})
 	)
@@ -153,12 +154,4 @@ TestCase::TestResult GasTest::run(ostream& _stream, string const& _linePrefix, b
 		printUpdatedExpectations(_stream, _linePrefix + "  ");
 		return TestResult::Failure;
 	}
-}
-
-void GasTest::printSource(ostream& _stream, string const& _linePrefix, bool) const
-{
-	string line;
-	istringstream input(m_source);
-	while (getline(input, line))
-		_stream << _linePrefix << line << std::endl;
 }

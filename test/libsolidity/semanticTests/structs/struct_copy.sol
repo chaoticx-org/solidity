@@ -33,17 +33,16 @@ contract c {
         c = data[k].c;
     }
 }
-
 // ----
 // set(uint256): 7 -> true
-// gas irOptimized: 110032
-// gas legacy: 110616
-// gas legacyOptimized: 110006
+// gas irOptimized: 109932
+// gas legacy: 110593
+// gas legacyOptimized: 110003
 // retrieve(uint256): 7 -> 1, 3, 4, 2
 // copy(uint256,uint256): 7, 8 -> true
-// gas irOptimized: 118594
-// gas legacy: 119166
-// gas legacyOptimized: 118622
+// gas irOptimized: 118581
+// gas legacy: 119144
+// gas legacyOptimized: 118618
 // retrieve(uint256): 7 -> 1, 3, 4, 2
 // retrieve(uint256): 8 -> 1, 3, 4, 2
 // copy(uint256,uint256): 0, 7 -> true

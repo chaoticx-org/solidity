@@ -21,7 +21,7 @@ contract C {
         return d.f();
     }
 }
-
 // ----
 // test() -> 7
-// gas legacy: 102264
+// gas legacy: 76647
+// gas legacy code: 24200

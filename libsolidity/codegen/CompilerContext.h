@@ -62,16 +62,17 @@ class CompilerContext
 public:
 	explicit CompilerContext(
 		langutil::EVMVersion _evmVersion,
+		std::optional<uint8_t> _eofVersion,
 		RevertStrings _revertStrings,
 		CompilerContext* _runtimeContext = nullptr
 	):
-		m_asm(std::make_shared<evmasm::Assembly>(_runtimeContext != nullptr, std::string{})),
+		m_asm(std::make_shared<evmasm::Assembly>(_evmVersion, _runtimeContext != nullptr, std::nullopt, std::string{})),
 		m_evmVersion(_evmVersion),
 		m_revertStrings(_revertStrings),
 		m_reservedMemory{0},
 		m_runtimeContext(_runtimeContext),
-		m_abiFunctions(m_evmVersion, m_revertStrings, m_yulFunctionCollector),
-		m_yulUtilFunctions(m_evmVersion, m_revertStrings, m_yulFunctionCollector)
+		m_abiFunctions(m_evmVersion, _eofVersion, m_revertStrings, m_yulFunctionCollector),
+		m_yulUtilFunctions(m_evmVersion, _eofVersion, m_revertStrings, m_yulFunctionCollector)
 	{
 		if (m_runtimeContext)
 			m_runtimeSub = size_t(m_asm->newSub(m_runtimeContext->m_asm).data());
@@ -277,13 +278,13 @@ public:
 	/// Otherwise returns "revert(0, 0)".
 	std::string revertReasonIfDebug(std::string const& _message = "");
 
-	void optimizeYul(yul::Object& _object, yul::EVMDialect const& _dialect, OptimiserSettings const& _optimiserSetting, std::set<yul::YulString> const& _externalIdentifiers = {});
+	void optimizeYul(yul::Object& _object, OptimiserSettings const& _optimiserSetting, std::set<yul::YulName> const& _externalIdentifiers = {});
 
 	/// Appends arbitrary data to the end of the bytecode.
 	void appendToAuxiliaryData(bytes const& _data) { m_asm->appendToAuxiliaryData(_data); }
 
 	/// Run optimisation step.
-	void optimise(OptimiserSettings const& _settings) { m_asm->optimise(translateOptimiserSettings(_settings)); }
+	void optimise(OptimiserSettings const& _settings) { m_asm->optimise(evmasm::Assembly::OptimiserSettings::translateSettings(_settings, m_evmVersion)); }
 
 	/// @returns the runtime context if in creation mode and runtime context is set, nullptr otherwise.
 	CompilerContext* runtimeContext() const { return m_runtimeContext; }
@@ -313,8 +314,6 @@ public:
 private:
 	/// Updates source location set in the assembly.
 	void updateSourceLocation();
-
-	evmasm::Assembly::OptimiserSettings translateOptimiserSettings(OptimiserSettings const& _settings);
 
 	/**
 	 * Helper class that manages function labels and ensures that referenced functions are

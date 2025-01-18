@@ -17,10 +17,12 @@ contract test {
         return h.getBalance{value: amount + 3, gas: 1000}();
     }
 }
-
 // ----
 // constructor(), 20 wei ->
-// gas irOptimized: 176003
-// gas legacy: 257656
-// gas legacyOptimized: 183070
+// gas irOptimized: 114463
+// gas irOptimized code: 58800
+// gas legacy: 120091
+// gas legacy code: 132400
+// gas legacyOptimized: 114536
+// gas legacyOptimized code: 65800
 // sendAmount(uint256): 5 -> 8

@@ -22,7 +22,7 @@
 #pragma once
 
 #include <libyul/ASTForward.h>
-#include <libyul/YulString.h>
+#include <libyul/YulName.h>
 #include <libyul/optimiser/OptimiserStep.h>
 #include <libyul/optimiser/NameDispenser.h>
 #include <liblangutil/EVMVersion.h>
@@ -36,9 +36,9 @@ namespace solidity::yul
 {
 
 struct AsmAnalysisInfo;
-struct Dialect;
+class Dialect;
 class GasMeter;
-struct Object;
+class Object;
 
 /**
  * Optimiser suite that combines all steps and also provides the settings for the heuristics.
@@ -51,7 +51,7 @@ public:
 
 	/// Special characters that do not represent optimiser steps but are allowed in abbreviation sequences.
 	/// Some of them (like whitespace) are ignored, others (like brackets) are a part of the syntax.
-	static constexpr char NonStepAbbreviations[] = " \n[]";
+	static constexpr char NonStepAbbreviations[] = " \n[]:";
 
 	enum class Debug
 	{
@@ -63,18 +63,22 @@ public:
 
 	/// The value nullopt for `_expectedExecutionsPerDeployment` represents creation code.
 	static void run(
-		Dialect const& _dialect,
 		GasMeter const* _meter,
 		Object& _object,
 		bool _optimizeStackAllocation,
 		std::string_view _optimisationSequence,
+		std::string_view _optimisationCleanupSequence,
 		std::optional<size_t> _expectedExecutionsPerDeployment,
-		std::set<YulString> const& _externallyUsedIdentifiers = {}
+		std::set<YulName> const& _externallyUsedIdentifiers = {}
 	);
 
 	/// Ensures that specified sequence of step abbreviations is well-formed and can be executed.
 	/// @throw OptimizerException if the sequence is invalid
 	static void validateSequence(std::string_view _stepAbbreviations);
+	/// Check whether the provided sequence is empty provided that the allowed characters are
+	/// whitespace, newline and :
+	static bool isEmptyOptimizerSequence(std::string const& _sequence);
+
 
 	void runSequence(std::vector<std::string> const& _steps, Block& _ast);
 	void runSequence(std::string_view _stepAbbreviations, Block& _ast, bool _repeatUntilStable = false);

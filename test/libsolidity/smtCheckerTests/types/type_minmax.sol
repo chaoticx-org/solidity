@@ -1,12 +1,4 @@
 contract C {
-	function f(uint a) public pure {
-		assert(a <= type(uint).max);
-		assert(a >= type(uint).min);
-		require(a <= type(uint64).max);
-		assert(a <= type(uint64).max);
-		assert(a <= type(uint32).max);
-	}
-
 	function int_min() public pure {
 		int8 int8_min = type(int8).min;
 		assert(int8_min == -2**7);
@@ -81,4 +73,4 @@ contract C {
 // ====
 // SMTEngine: all
 // ----
-// Warning 6328: (178-207): CHC: Assertion violation happens here.\nCounterexample:\n\na = 4294967296\n\nTransaction trace:\nC.constructor()\nC.f(4294967296)
+// Info 1391: CHC: 21 verification condition(s) proved safe! Enable the model checker option "show proved safe" to see all of them.

@@ -22,7 +22,7 @@
 set -e
 
 source scripts/common.sh
-source test/externalTests/common.sh
+source scripts/externalTests/common.sh
 
 REPO_ROOT=$(realpath "$(dirname "$0")/../..")
 
@@ -45,7 +45,6 @@ function test_fn {
 function trident_test
 {
     local repo="https://github.com/sushiswap/trident"
-    local ref_type=commit
     # FIXME: Switch back to master branch when https://github.com/sushiswap/trident/issues/303 gets fixed.
     local ref="0cab5ae884cc9a41223d52791be775c3a053cb26" # master as of 2021-12-16
     local config_file="hardhat.config.ts"
@@ -54,9 +53,9 @@ function trident_test
     local compile_only_presets=()
     local settings_presets=(
         "${compile_only_presets[@]}"
-        #ir-no-optimize            # Compilation fails with: "YulException: Variable var_amount_165 is 9 slot(s) too deep inside the stack."
-        #ir-optimize-evm-only      # Compilation fails with: "YulException: Variable var_amount_165 is 9 slot(s) too deep inside the stack."
-        ir-optimize-evm+yul       # Needs memory-safe inline assembly patch
+        ir-no-optimize
+        ir-optimize-evm-only
+        ir-optimize-evm+yul        # Needs memory-safe inline assembly patch
         legacy-no-optimize
         legacy-optimize-evm-only
         legacy-optimize-evm+yul
@@ -66,7 +65,7 @@ function trident_test
     print_presets_or_exit "$SELECTED_PRESETS"
 
     setup_solc "$DIR" "$BINARY_TYPE" "$BINARY_PATH"
-    download_project "$repo" "$ref_type" "$ref" "$DIR"
+    download_project "$repo" "$ref" "$DIR"
 
     # TODO: Currently tests work only with the exact versions from yarn.lock.
     # Re-enable this when https://github.com/sushiswap/trident/issues/284 is fixed.
@@ -89,7 +88,7 @@ function trident_test
     sed -i 's|IStrategy(0)|IStrategy(address(0))|g' contracts/flat/BentoBoxV1Flat.sol
     find contracts -name "*.sol" -exec sed -i -e 's/^\(\s*\)\(assembly\)/\1\/\/\/ @solidity memory-safe-assembly\n\1\2/' '{}' \;
 
-    # TODO: Remove this when https://github.com/NomicFoundation/hardhat/issues/2453 gets fixed.
+    # TODO: Remove this when https://github.com/NomicFoundation/hardhat/issues/3365 gets fixed.
     sed -i 's|it\(("Reverts on direct deployment via factory"\)|it.skip\1|g' test/MasterDeployer.test.ts
 
     # @sushiswap/core package contains contracts that get built with 0.6.12 and fail our compiler

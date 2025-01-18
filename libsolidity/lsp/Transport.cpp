@@ -16,6 +16,7 @@
 */
 // SPDX-License-Identifier: GPL-3.0
 #include <libsolidity/lsp/Transport.h>
+#include <libsolidity/lsp/Utils.h>
 
 #include <libsolutil/JSON.h>
 #include <libsolutil/Visitor.h>
@@ -36,54 +37,54 @@
 #include <fcntl.h>
 #endif
 
-using namespace std;
 using namespace solidity::lsp;
+using namespace solidity;
 
 // {{{ Transport
-optional<Json::Value> Transport::receive()
+std::optional<Json> Transport::receive()
 {
 	auto const headers = parseHeaders();
 	if (!headers)
 	{
 		error({}, ErrorCode::ParseError, "Could not parse RPC headers.");
-		return nullopt;
+		return std::nullopt;
 	}
 
 	if (!headers->count("content-length"))
 	{
 		error({}, ErrorCode::ParseError, "No content-length header found.");
-		return nullopt;
+		return std::nullopt;
 	}
 
-	string const data = readBytes(stoul(headers->at("content-length")));
+	std::string const data = readBytes(stoul(headers->at("content-length")));
 
-	Json::Value jsonMessage;
-	string jsonParsingErrors;
+	Json jsonMessage;
+	std::string jsonParsingErrors;
 	solidity::util::jsonParseStrict(data, jsonMessage, &jsonParsingErrors);
-	if (!jsonParsingErrors.empty() || !jsonMessage || !jsonMessage.isObject())
+	if (!jsonParsingErrors.empty() || jsonMessage.empty() || !jsonMessage.is_object())
 	{
 		error({}, ErrorCode::ParseError, "Could not parse RPC JSON payload. " + jsonParsingErrors);
-		return nullopt;
+		return std::nullopt;
 	}
 
-	return {move(jsonMessage)};
+	return {std::move(jsonMessage)};
 }
 
-void Transport::trace(std::string _message, Json::Value _extra)
+void Transport::trace(std::string _message, Json _extra)
 {
 	if (m_logTrace != TraceValue::Off)
 	{
-		Json::Value params;
-		if (_extra.isObject())
-			params = move(_extra);
-		params["message"] = move(_message);
-		notify("$/logTrace", move(params));
+		Json params;
+		if (_extra.is_object())
+			params = std::move(_extra);
+		params["message"] = std::move(_message);
+		notify("$/logTrace", std::move(params));
 	}
 }
 
-optional<map<string, string>> Transport::parseHeaders()
+std::optional<std::map<std::string, std::string>> Transport::parseHeaders()
 {
-	map<string, string> headers;
+	std::map<std::string, std::string> headers;
 
 	while (true)
 	{
@@ -92,49 +93,49 @@ optional<map<string, string>> Transport::parseHeaders()
 			break;
 
 		auto const delimiterPos = line.find(':');
-		if (delimiterPos == string::npos)
-			return nullopt;
+		if (delimiterPos == std::string::npos)
+			return std::nullopt;
 
 		auto const name = boost::to_lower_copy(line.substr(0, delimiterPos));
 		auto const value = line.substr(delimiterPos + 1);
 		if (!headers.emplace(boost::trim_copy(name), boost::trim_copy(value)).second)
-			return nullopt;
+			return std::nullopt;
 	}
-	return {move(headers)};
+	return {std::move(headers)};
 }
 
-void Transport::notify(string _method, Json::Value _message)
+void Transport::notify(std::string _method, Json _message)
 {
-	Json::Value json;
-	json["method"] = move(_method);
-	json["params"] = move(_message);
-	send(move(json));
+	Json json;
+	json["method"] = std::move(_method);
+	json["params"] = std::move(_message);
+	send(std::move(json));
 }
 
-void Transport::reply(MessageID _id, Json::Value _message)
+void Transport::reply(MessageID _id, Json _message)
 {
-	Json::Value json;
-	json["result"] = move(_message);
-	send(move(json), _id);
+	Json json;
+	json["result"] = std::move(_message);
+	send(std::move(json), _id);
 }
 
-void Transport::error(MessageID _id, ErrorCode _code, string _message)
+void Transport::error(MessageID _id, ErrorCode _code, std::string _message)
 {
-	Json::Value json;
+	Json json;
 	json["error"]["code"] = static_cast<int>(_code);
-	json["error"]["message"] = move(_message);
-	send(move(json), _id);
+	json["error"]["message"] = std::move(_message);
+	send(std::move(json), _id);
 }
 
-void Transport::send(Json::Value _json, MessageID _id)
+void Transport::send(Json _json, MessageID _id)
 {
-	solAssert(_json.isObject());
+	solAssert(_json.is_object());
 	_json["jsonrpc"] = "2.0";
-	if (_id != Json::nullValue)
+	if (_id != Json())
 		_json["id"] = _id;
 
 	// Trailing CRLF only for easier readability.
-	string const jsonString = solidity::util::jsonCompactPrint(_json);
+	std::string const jsonString = solidity::util::jsonCompactPrint(_json);
 
 	writeBytes(fmt::format("Content-Length: {}\r\n\r\n", jsonString.size()));
 	writeBytes(jsonString);
@@ -143,7 +144,7 @@ void Transport::send(Json::Value _json, MessageID _id)
 // }}}
 
 // {{{ IOStreamTransport
-IOStreamTransport::IOStreamTransport(istream& _in, ostream& _out):
+IOStreamTransport::IOStreamTransport(std::istream& _in, std::ostream& _out):
 	m_input{_in},
 	m_output{_out}
 {
@@ -161,7 +162,7 @@ std::string IOStreamTransport::readBytes(size_t _length)
 
 std::string IOStreamTransport::getline()
 {
-	string line;
+	std::string line;
 	std::getline(m_input, line);
 	return line;
 }
@@ -205,11 +206,13 @@ std::string StdioTransport::getline()
 {
 	std::string line;
 	std::getline(std::cin, line);
+	lspDebug(fmt::format("Received: {}", line));
 	return line;
 }
 
 void StdioTransport::writeBytes(std::string_view _data)
 {
+	lspDebug(fmt::format("Sending: {}", _data));
 	auto const bytesWritten = fwrite(_data.data(), 1, _data.size(), stdout);
 	solAssert(bytesWritten == _data.size());
 }

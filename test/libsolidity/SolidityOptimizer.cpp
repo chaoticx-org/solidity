@@ -35,7 +35,6 @@
 #include <memory>
 #include <limits>
 
-using namespace std;
 using namespace solidity::util;
 using namespace solidity::evmasm;
 using namespace solidity::test;
@@ -79,9 +78,9 @@ public:
 		size_t optimizedSize = numInstructions(m_optimizedBytecode);
 		BOOST_CHECK_MESSAGE(
 			_optimizeRuns < 50 || optimizedSize < nonOptimizedSize,
-			string("Optimizer did not reduce bytecode size. Non-optimized size: ") +
-			to_string(nonOptimizedSize) + " - optimized size: " +
-			to_string(optimizedSize)
+			std::string("Optimizer did not reduce bytecode size. Non-optimized size: ") +
+			std::to_string(nonOptimizedSize) + " - optimized size: " +
+			std::to_string(optimizedSize)
 		);
 		m_optimizedContract = m_contractAddress;
 	}
@@ -109,7 +108,7 @@ public:
 		bytes realCode = bytecodeSansMetadata(_bytecode);
 		BOOST_REQUIRE_MESSAGE(!realCode.empty(), "Invalid or missing metadata in bytecode.");
 		size_t instructions = 0;
-		evmasm::eachInstruction(realCode, [&](Instruction _instr, u256 const&) {
+		evmasm::eachInstruction(realCode, m_evmVersion, [&](Instruction _instr, u256 const&) {
 			if (!_which || *_which == _instr)
 				instructions++;
 		});
@@ -287,12 +286,12 @@ BOOST_AUTO_TEST_CASE(retain_information_in_branches)
 
 	bytes optimizedBytecode = compileAndRunWithOptimizer(sourceCode, 0, "c", true);
 	size_t numSHA3s = 0;
-	eachInstruction(optimizedBytecode, [&](Instruction _instr, u256 const&) {
+	eachInstruction(optimizedBytecode, m_evmVersion, [&](Instruction _instr, u256 const&) {
 		if (_instr == Instruction::KECCAK256)
 			numSHA3s++;
 	});
 // TEST DISABLED - OPTIMIZER IS NOT EFFECTIVE ON THIS ONE ANYMORE
-//	BOOST_CHECK_EQUAL(1, numSHA3s);
+// BOOST_CHECK_EQUAL(1, numSHA3s);
 }
 
 BOOST_AUTO_TEST_CASE(store_tags_as_unions)
@@ -330,12 +329,12 @@ BOOST_AUTO_TEST_CASE(store_tags_as_unions)
 
 	bytes optimizedBytecode = compileAndRunWithOptimizer(sourceCode, 0, "test", true);
 	size_t numSHA3s = 0;
-	eachInstruction(optimizedBytecode, [&](Instruction _instr, u256 const&) {
+	eachInstruction(optimizedBytecode, m_evmVersion, [&](Instruction _instr, u256 const&) {
 		if (_instr == Instruction::KECCAK256)
 			numSHA3s++;
 	});
 // TEST DISABLED UNTIL 93693404 IS IMPLEMENTED
-//	BOOST_CHECK_EQUAL(2, numSHA3s);
+// BOOST_CHECK_EQUAL(2, numSHA3s);
 }
 
 BOOST_AUTO_TEST_CASE(incorrect_storage_access_bug)
@@ -494,7 +493,7 @@ BOOST_AUTO_TEST_CASE(constant_optimization_early_exit)
 #endif
 #endif
 #if __SANITIZE_ADDRESS__
-	maxDuration = numeric_limits<size_t>::max();
+	maxDuration = std::numeric_limits<size_t>::max();
 	BOOST_TEST_MESSAGE("Disabled constant optimizer run time check for address sanitizer build.");
 #endif
 	BOOST_CHECK_MESSAGE(duration <= double(maxDuration), "Compilation of constants took longer than 20 seconds.");

@@ -23,8 +23,11 @@
  */
 
 #include <libyul/AsmJsonImporter.h>
+
 #include <libyul/AST.h>
+#include <libyul/Dialect.h>
 #include <libyul/Exceptions.h>
+#include <libyul/Utilities.h>
 
 #include <liblangutil/Exceptions.h>
 #include <liblangutil/Scanner.h>
@@ -34,7 +37,6 @@
 
 #include <vector>
 
-using namespace std;
 using namespace solidity::langutil;
 
 namespace solidity::yul
@@ -42,15 +44,20 @@ namespace solidity::yul
 
 using SourceLocation = langutil::SourceLocation;
 
-SourceLocation const AsmJsonImporter::createSourceLocation(Json::Value const& _node)
+SourceLocation const AsmJsonImporter::createSourceLocation(Json const& _node)
 {
-	yulAssert(member(_node, "src").isString(), "'src' must be a string");
+	yulAssert(member(_node, "src").is_string(), "'src' must be a string");
 
-	return solidity::langutil::parseSourceLocation(_node["src"].asString(), m_sourceNames);
+	return solidity::langutil::parseSourceLocation(_node["src"].get<std::string>(), m_sourceNames);
+}
+
+AST AsmJsonImporter::createAST(solidity::Json const& _node)
+{
+	return {m_dialect, createBlock(_node)};
 }
 
 template <class T>
-T AsmJsonImporter::createAsmNode(Json::Value const& _node)
+T AsmJsonImporter::createAsmNode(Json const& _node)
 {
 	T r;
 	SourceLocation nativeLocation = createSourceLocation(_node);
@@ -62,26 +69,25 @@ T AsmJsonImporter::createAsmNode(Json::Value const& _node)
 	return r;
 }
 
-Json::Value AsmJsonImporter::member(Json::Value const& _node, string const& _name)
+Json AsmJsonImporter::member(Json const& _node, std::string const& _name)
 {
-	if (!_node.isMember(_name))
-		return Json::nullValue;
+	if (!_node.contains(_name))
+		return Json();
 	return _node[_name];
 }
 
-TypedName AsmJsonImporter::createTypedName(Json::Value const& _node)
+NameWithDebugData AsmJsonImporter::createNameWithDebugData(Json const& _node)
 {
-	auto typedName = createAsmNode<TypedName>(_node);
-	typedName.type = YulString{member(_node, "type").asString()};
-	typedName.name = YulString{member(_node, "name").asString()};
-	return typedName;
+	auto nameWithDebugData = createAsmNode<NameWithDebugData>(_node);
+	nameWithDebugData.name = YulName{member(_node, "name").get<std::string>()};
+	return nameWithDebugData;
 }
 
-Statement AsmJsonImporter::createStatement(Json::Value const& _node)
+Statement AsmJsonImporter::createStatement(Json const& _node)
 {
-	Json::Value jsonNodeType = member(_node, "nodeType");
-	yulAssert(jsonNodeType.isString(), "Expected \"nodeType\" to be of type string!");
-	string nodeType = jsonNodeType.asString();
+	Json jsonNodeType = member(_node, "nodeType");
+	yulAssert(jsonNodeType.is_string(), "Expected \"nodeType\" to be of type string!");
+	std::string nodeType = jsonNodeType.get<std::string>();
 
 	yulAssert(nodeType.substr(0, 3) == "Yul", "Invalid nodeType prefix");
 	nodeType = nodeType.substr(3);
@@ -115,11 +121,11 @@ Statement AsmJsonImporter::createStatement(Json::Value const& _node)
 	util::unreachable();
 }
 
-Expression AsmJsonImporter::createExpression(Json::Value const& _node)
+Expression AsmJsonImporter::createExpression(Json const& _node)
 {
-	Json::Value jsonNodeType = member(_node, "nodeType");
-	yulAssert(jsonNodeType.isString(), "Expected \"nodeType\" to be of type string!");
-	string nodeType = jsonNodeType.asString();
+	Json jsonNodeType = member(_node, "nodeType");
+	yulAssert(jsonNodeType.is_string(), "Expected \"nodeType\" to be of type string!");
+	std::string nodeType = jsonNodeType.get<std::string>();
 
 	yulAssert(nodeType.substr(0, 3) == "Yul", "Invalid nodeType prefix");
 	nodeType = nodeType.substr(3);
@@ -137,55 +143,63 @@ Expression AsmJsonImporter::createExpression(Json::Value const& _node)
 	util::unreachable();
 }
 
-vector<Expression> AsmJsonImporter::createExpressionVector(Json::Value const& _array)
+std::vector<Expression> AsmJsonImporter::createExpressionVector(Json const& _array)
 {
-	vector<Expression> ret;
+	std::vector<Expression> ret;
 	for (auto& var: _array)
 		ret.emplace_back(createExpression(var));
 	return ret;
 }
 
-vector<Statement> AsmJsonImporter::createStatementVector(Json::Value const& _array)
+std::vector<Statement> AsmJsonImporter::createStatementVector(Json const& _array)
 {
-	vector<Statement> ret;
+	std::vector<Statement> ret;
 	for (auto& var: _array)
 		ret.emplace_back(createStatement(var));
 	return ret;
 }
 
-Block AsmJsonImporter::createBlock(Json::Value const& _node)
+Block AsmJsonImporter::createBlock(Json const& _node)
 {
 	auto block = createAsmNode<Block>(_node);
 	block.statements = createStatementVector(_node["statements"]);
 	return block;
 }
 
-Literal AsmJsonImporter::createLiteral(Json::Value const& _node)
+Literal AsmJsonImporter::createLiteral(Json const& _node)
 {
 	auto lit = createAsmNode<Literal>(_node);
-	string kind = member(_node, "kind").asString();
+	std::string kind = member(_node, "kind").get<std::string>();
 
-	solAssert(member(_node, "hexValue").isString() || member(_node, "value").isString(), "");
-	if (_node.isMember("hexValue"))
-		lit.value = YulString{util::asString(util::fromHex(member(_node, "hexValue").asString()))};
+	solAssert(member(_node, "hexValue").is_string() || member(_node, "value").is_string(), "");
+	std::string value;
+	if (_node.contains("hexValue"))
+		value = util::asString(util::fromHex(member(_node, "hexValue").get<std::string>()));
 	else
-		lit.value = YulString{member(_node, "value").asString()};
-
-	lit.type= YulString{member(_node, "type").asString()};
-
+		value = member(_node, "value").get<std::string>();
+	{
+		auto const typeNode = member(_node, "type");
+		yulAssert(
+			typeNode.empty() || typeNode.get<std::string>().empty(),
+			fmt::format(
+				"Expected literal types to be either empty or absent in the JSON. Got \"{}\".",
+				typeNode.get<std::string>()
+			)
+		);
+	}
 	if (kind == "number")
 	{
-		langutil::CharStream charStream(lit.value.str(), "");
+		langutil::CharStream charStream(value, "");
 		langutil::Scanner scanner{charStream};
 		lit.kind = LiteralKind::Number;
 		yulAssert(
 			scanner.currentToken() == Token::Number,
-			"Expected number but got " + langutil::TokenTraits::friendlyName(scanner.currentToken()) + string(" while scanning ") + lit.value.str()
+			"Expected number but got " + langutil::TokenTraits::friendlyName(scanner.currentToken()) + std::string(" while scanning ") + value
 		);
 	}
 	else if (kind == "bool")
 	{
-		langutil::CharStream charStream(lit.value.str(), "");
+		langutil::CharStream charStream(value, "");
 		langutil::Scanner scanner{charStream};
 		lit.kind = LiteralKind::Boolean;
 		yulAssert(
@@ -198,130 +212,146 @@ Literal AsmJsonImporter::createLiteral(Json::Value const& _node)
 	{
 		lit.kind = LiteralKind::String;
 		yulAssert(
-			lit.value.str().size() <= 32,
-			"String literal too long (" + to_string(lit.value.str().size()) + " > 32)"
+			value.size() <= 32,
+			"String literal too long (" + std::to_string(value.size()) + " > 32)"
 		);
 	}
 	else
 		yulAssert(false, "unknown type of literal");
 
+	// import only for inline assembly, no unlimited string literals there
+	lit.value = valueOfLiteral(value, lit.kind, false /* _unlimitedLiteralArgument */);
+
+	yulAssert(validLiteral(lit));
 	return lit;
 }
 
-Leave AsmJsonImporter::createLeave(Json::Value const& _node)
+Leave AsmJsonImporter::createLeave(Json const& _node)
 {
 	return createAsmNode<Leave>(_node);
 }
 
-Identifier AsmJsonImporter::createIdentifier(Json::Value const& _node)
+Identifier AsmJsonImporter::createIdentifier(Json const& _node)
 {
 	auto identifier = createAsmNode<Identifier>(_node);
-	identifier.name = YulString(member(_node, "name").asString());
+	identifier.name = YulName(member(_node, "name").get<std::string>());
 	return identifier;
 }
 
-Assignment AsmJsonImporter::createAssignment(Json::Value const& _node)
+Assignment AsmJsonImporter::createAssignment(Json const& _node)
 {
 	auto assignment = createAsmNode<Assignment>(_node);
 
-	if (_node.isMember("variableNames"))
+	if (_node.contains("variableNames"))
 		for (auto const& var: member(_node, "variableNames"))
 			assignment.variableNames.emplace_back(createIdentifier(var));
 
-	assignment.value = make_unique<Expression>(createExpression(member(_node, "value")));
+	assignment.value = std::make_unique<Expression>(createExpression(member(_node, "value")));
 	return assignment;
 }
 
-FunctionCall AsmJsonImporter::createFunctionCall(Json::Value const& _node)
+FunctionCall AsmJsonImporter::createFunctionCall(Json const& _node)
 {
 	auto functionCall = createAsmNode<FunctionCall>(_node);
 
 	for (auto const& var: member(_node, "arguments"))
 		functionCall.arguments.emplace_back(createExpression(var));
 
-	functionCall.functionName = createIdentifier(member(_node, "functionName"));
+	auto const functionNameNode = member(_node, "functionName");
+	auto const name = member(functionNameNode, "name").get<std::string>();
+	if (std::optional<BuiltinHandle> builtinHandle = m_dialect.findBuiltin(name))
+	{
+		auto builtin = createAsmNode<BuiltinName>(functionNameNode);
+		builtin.handle = *builtinHandle;
+		functionCall.functionName = builtin;
+	}
+	else
+		functionCall.functionName = createIdentifier(functionNameNode);
 
 	return functionCall;
 }
 
-ExpressionStatement AsmJsonImporter::createExpressionStatement(Json::Value const& _node)
+ExpressionStatement AsmJsonImporter::createExpressionStatement(Json const& _node)
 {
 	auto statement = createAsmNode<ExpressionStatement>(_node);
 	statement.expression = createExpression(member(_node, "expression"));
 	return statement;
 }
 
-VariableDeclaration AsmJsonImporter::createVariableDeclaration(Json::Value const& _node)
+VariableDeclaration AsmJsonImporter::createVariableDeclaration(Json const& _node)
 {
 	auto varDec = createAsmNode<VariableDeclaration>(_node);
 	for (auto const& var: member(_node, "variables"))
-		varDec.variables.emplace_back(createTypedName(var));
-	varDec.value = make_unique<Expression>(createExpression(member(_node, "value")));
+		varDec.variables.emplace_back(createNameWithDebugData(var));
+
+	if (_node.contains("value"))
+		varDec.value = std::make_unique<Expression>(createExpression(member(_node, "value")));
+
 	return varDec;
 }
 
-FunctionDefinition AsmJsonImporter::createFunctionDefinition(Json::Value const& _node)
+FunctionDefinition AsmJsonImporter::createFunctionDefinition(Json const& _node)
 {
 	auto funcDef = createAsmNode<FunctionDefinition>(_node);
-	funcDef.name = YulString{member(_node, "name").asString()};
+	funcDef.name = YulName{member(_node, "name").get<std::string>()};
 
-	if (_node.isMember("parameters"))
+	if (_node.contains("parameters"))
 		for (auto const& var: member(_node, "parameters"))
-			funcDef.parameters.emplace_back(createTypedName(var));
+			funcDef.parameters.emplace_back(createNameWithDebugData(var));
 
-	if (_node.isMember("returnVariables"))
+	if (_node.contains("returnVariables"))
 		for (auto const& var: member(_node, "returnVariables"))
-			funcDef.returnVariables.emplace_back(createTypedName(var));
+			funcDef.returnVariables.emplace_back(createNameWithDebugData(var));
 
 	funcDef.body = createBlock(member(_node, "body"));
 	return funcDef;
 }
 
-If AsmJsonImporter::createIf(Json::Value const& _node)
+If AsmJsonImporter::createIf(Json const& _node)
 {
 	auto ifStatement = createAsmNode<If>(_node);
-	ifStatement.condition = make_unique<Expression>(createExpression(member(_node, "condition")));
+	ifStatement.condition = std::make_unique<Expression>(createExpression(member(_node, "condition")));
 	ifStatement.body = createBlock(member(_node, "body"));
 	return ifStatement;
 }
 
-Case AsmJsonImporter::createCase(Json::Value const& _node)
+Case AsmJsonImporter::createCase(Json const& _node)
 {
 	auto caseStatement = createAsmNode<Case>(_node);
 	auto const& value = member(_node, "value");
-	if (value.isString())
-		yulAssert(value.asString() == "default", "Expected default case");
+	if (value.is_string())
+		yulAssert(value.get<std::string>() == "default", "Expected default case");
 	else
-		caseStatement.value = make_unique<Literal>(createLiteral(value));
+		caseStatement.value = std::make_unique<Literal>(createLiteral(value));
 	caseStatement.body = createBlock(member(_node, "body"));
 	return caseStatement;
 }
 
-Switch AsmJsonImporter::createSwitch(Json::Value const& _node)
+Switch AsmJsonImporter::createSwitch(Json const& _node)
 {
 	auto switchStatement = createAsmNode<Switch>(_node);
-	switchStatement.expression = make_unique<Expression>(createExpression(member(_node, "expression")));
+	switchStatement.expression = std::make_unique<Expression>(createExpression(member(_node, "expression")));
 	for (auto const& var: member(_node, "cases"))
 		switchStatement.cases.emplace_back(createCase(var));
 	return switchStatement;
 }
 
-ForLoop AsmJsonImporter::createForLoop(Json::Value const& _node)
+ForLoop AsmJsonImporter::createForLoop(Json const& _node)
 {
 	auto forLoop = createAsmNode<ForLoop>(_node);
 	forLoop.pre = createBlock(member(_node, "pre"));
-	forLoop.condition = make_unique<Expression>(createExpression(member(_node, "condition")));
+	forLoop.condition = std::make_unique<Expression>(createExpression(member(_node, "condition")));
 	forLoop.post = createBlock(member(_node, "post"));
 	forLoop.body = createBlock(member(_node, "body"));
 	return forLoop;
 }
 
-Break AsmJsonImporter::createBreak(Json::Value const& _node)
+Break AsmJsonImporter::createBreak(Json const& _node)
 {
 	return createAsmNode<Break>(_node);
 }
 
-Continue AsmJsonImporter::createContinue(Json::Value const& _node)
+Continue AsmJsonImporter::createContinue(Json const& _node)
 {
 	return createAsmNode<Continue>(_node);
 }

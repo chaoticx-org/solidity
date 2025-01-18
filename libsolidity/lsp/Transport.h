@@ -18,8 +18,7 @@
 #pragma once
 
 #include <libsolutil/Exceptions.h>
-
-#include <json/value.h>
+#include <libsolutil/JSON.h>
 
 #include <functional>
 #include <iosfwd>
@@ -32,7 +31,7 @@
 namespace solidity::lsp
 {
 
-using MessageID = Json::Value;
+using MessageID = Json;
 
 enum class TraceValue
 {
@@ -71,7 +70,14 @@ private:
 	ErrorCode m_code;
 };
 
-#define lspAssert(condition, errorCode, errorMessage) \
+/**
+ * Ensures precondition check is valid.
+ * This is supposed to be a recoverable error, that means, if the condition fails to be valid,
+ * an exception is being raised to be thrown out of the current request handlers
+ * of the current LSP's client RPC call and this will cause the current request to fail
+ * with the given error code - but subsequent calls shall be able to continue.
+ */
+#define lspRequire(condition, errorCode, errorMessage) \
 	if (!(condition)) \
 	{ \
 		BOOST_THROW_EXCEPTION( \
@@ -91,14 +97,14 @@ class Transport
 public:
 	virtual ~Transport() = default;
 
-	std::optional<Json::Value> receive();
-	void notify(std::string _method, Json::Value _params);
-	void reply(MessageID _id, Json::Value _result);
+	std::optional<Json> receive();
+	void notify(std::string _method, Json _params);
+	void reply(MessageID _id, Json _result);
 	void error(MessageID _id, ErrorCode _code, std::string _message);
 
 	virtual bool closed() const noexcept = 0;
 
-	void trace(std::string _message, Json::Value _extra = Json::nullValue);
+	void trace(std::string _message, Json _extra = Json{});
 
 	TraceValue traceValue() const noexcept { return m_logTrace; }
 	void setTrace(TraceValue _value) noexcept { m_logTrace = _value; }
@@ -115,7 +121,7 @@ protected:
 	/// the message body from the transport line.
 	virtual std::string readBytes(size_t _byteCount) = 0;
 
-	// Mimmicks std::getline() on this Transport API.
+	// Mimics std::getline() on this Transport API.
 	virtual std::string getline() = 0;
 
 	/// Writes the given payload @p _data to transport.
@@ -128,7 +134,7 @@ protected:
 	/// Sends an arbitrary raw message to the client.
 	///
 	/// Used by the notify/reply/error function family.
-	virtual void send(Json::Value _message, MessageID _id = Json::nullValue);
+	virtual void send(Json _message, MessageID _id = Json{});
 };
 
 /**

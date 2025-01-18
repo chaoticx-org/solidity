@@ -87,6 +87,7 @@ private:
 	void endVisit(RevertStatement const& _revert) override;
 
 	bool visit(FunctionCall const& _functionCall) override;
+	void endVisit(FunctionCall const& _functionCall) override;
 
 	bool visit(Identifier const& _identifier) override;
 	bool visit(MemberAccess const& _identifier) override;
@@ -96,6 +97,9 @@ private:
 
 	bool visit(ModifierInvocation const& _modifierInvocation) override;
 	void endVisit(ModifierInvocation const& _modifierInvocation) override;
+
+	bool visit(ForStatement const& _forStatement) override;
+	void endVisit(ForStatement const& _forStatement) override;
 
 	template <class T>
 	bool callVisit(T const& _node)

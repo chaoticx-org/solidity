@@ -21,6 +21,7 @@
 #pragma once
 
 #include <libyul/backends/evm/ControlFlowGraph.h>
+#include <libyul/ControlFlowSideEffects.h>
 
 namespace solidity::yul
 {
@@ -55,28 +56,30 @@ private:
 	ControlFlowGraphBuilder(
 		CFG& _graph,
 		AsmAnalysisInfo const& _analysisInfo,
+		std::map<FunctionDefinition const*, ControlFlowSideEffects> const& _functionSideEffects,
 		Dialect const& _dialect
 	);
 	void registerFunction(FunctionDefinition const& _function);
 	Stack const& visitFunctionCall(FunctionCall const&);
 	Stack visitAssignmentRightHandSide(Expression const& _expression, size_t _expectedSlotCount);
 
-	Scope::Function const& lookupFunction(YulString _name) const;
-	Scope::Variable const& lookupVariable(YulString _name) const;
+	Scope::Function const& lookupFunction(YulName _name) const;
+	Scope::Variable const& lookupVariable(YulName _name) const;
 	/// Resets m_currentBlock to enforce a subsequent explicit reassignment.
 	void makeConditionalJump(
-		std::shared_ptr<DebugData const> _debugData,
+		langutil::DebugData::ConstPtr _debugData,
 		StackSlot _condition,
 		CFG::BasicBlock& _nonZero,
 		CFG::BasicBlock& _zero
 	);
 	void jump(
-		std::shared_ptr<DebugData const> _debugData,
+		langutil::DebugData::ConstPtr _debugData,
 		CFG::BasicBlock& _target,
 		bool _backwards = false
 	);
 	CFG& m_graph;
 	AsmAnalysisInfo const& m_info;
+	std::map<FunctionDefinition const*, ControlFlowSideEffects> const& m_functionSideEffects;
 	Dialect const& m_dialect;
 	CFG::BasicBlock* m_currentBlock = nullptr;
 	Scope* m_scope = nullptr;
@@ -87,6 +90,8 @@ private:
 	};
 	std::optional<ForLoopInfo> m_forLoopInfo;
 	std::optional<CFG::FunctionInfo*> m_currentFunction;
+	/// True if control flow graph simulates functions with jumps. False otherwise. True for legacy bytecode
+	bool m_simulateFunctionsWithJumps = true;
 };
 
 }

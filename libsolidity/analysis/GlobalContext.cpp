@@ -28,50 +28,55 @@
 #include <libsolidity/ast/TypeProvider.h>
 #include <libsolidity/ast/Types.h>
 #include <memory>
-
-using namespace std;
+#include <unordered_map>
 
 namespace solidity::frontend
 {
 
 namespace
 {
+
 /// Magic variables get negative ids for easy differentiation
 int magicVariableToID(std::string const& _name)
 {
-	if (_name == "abi") return -1;
-	else if (_name == "addmod") return -2;
-	else if (_name == "assert") return -3;
-	else if (_name == "block") return -4;
-	else if (_name == "blockhash") return -5;
-	else if (_name == "ecrecover") return -6;
-	else if (_name == "gasleft") return -7;
-	else if (_name == "keccak256") return -8;
-	else if (_name == "msg") return -15;
-	else if (_name == "mulmod") return -16;
-	else if (_name == "now") return -17;
-	else if (_name == "require") return -18;
-	else if (_name == "revert") return -19;
-	else if (_name == "ripemd160") return -20;
-	else if (_name == "selfdestruct") return -21;
-	else if (_name == "sha256") return -22;
-	else if (_name == "sha3") return -23;
-	else if (_name == "suicide") return -24;
-	else if (_name == "super") return -25;
-	else if (_name == "tx") return -26;
-	else if (_name == "type") return -27;
-	else if (_name == "this") return -28;
-	else
-		solAssert(false, "Unknown magic variable: \"" + _name + "\".");
-}
-
-inline vector<shared_ptr<MagicVariableDeclaration const>> constructMagicVariables()
-{
-	static auto const magicVarDecl = [](string const& _name, Type const* _type) {
-		return make_shared<MagicVariableDeclaration>(magicVariableToID(_name), _name, _type);
+	static std::unordered_map<std::string, int> const magicVariables = {
+		{"abi", -1},
+		{"addmod", -2},
+		{"assert", -3},
+		{"block", -4},
+		{"blockhash", -5},
+		{"ecrecover", -6},
+		{"gasleft", -7},
+		{"keccak256", -8},
+		{"msg", -15},
+		{"mulmod", -16},
+		{"now", -17},
+		{"require", -18},
+		{"revert", -19},
+		{"ripemd160", -20},
+		{"selfdestruct", -21},
+		{"sha256", -22},
+		{"sha3", -23},
+		{"suicide", -24},
+		{"super", -25},
+		{"tx", -26},
+		{"type", -27},
+		{"this", -28},
+		{"blobhash", -29}
 	};
 
-	return {
+	if (auto id = magicVariables.find(_name); id != magicVariables.end())
+		return id->second;
+	solAssert(false, "Unknown magic variable: \"" + _name + "\".");
+}
+
+inline std::vector<std::shared_ptr<MagicVariableDeclaration const>> constructMagicVariables(langutil::EVMVersion _evmVersion)
+{
+	static auto const magicVarDecl = [](std::string const& _name, Type const* _type) {
+		return std::make_shared<MagicVariableDeclaration>(magicVariableToID(_name), _name, _type);
+	};
+
+	std::vector<std::shared_ptr<MagicVariableDeclaration const>> magicVariableDeclarations = {
 		magicVarDecl("abi", TypeProvider::magic(MagicType::Kind::ABI)),
 		magicVarDecl("addmod", TypeProvider::function(strings{"uint256", "uint256", "uint256"}, strings{"uint256"}, FunctionType::Kind::AddMod, StateMutability::Pure)),
 		magicVarDecl("assert", TypeProvider::function(strings{"bool"}, strings{}, FunctionType::Kind::Assert, StateMutability::Pure)),
@@ -85,6 +90,7 @@ inline vector<shared_ptr<MagicVariableDeclaration const>> constructMagicVariable
 		magicVarDecl("now", TypeProvider::uint256()),
 		magicVarDecl("require", TypeProvider::function(strings{"bool"}, strings{}, FunctionType::Kind::Require, StateMutability::Pure)),
 		magicVarDecl("require", TypeProvider::function(strings{"bool", "string memory"}, strings{}, FunctionType::Kind::Require, StateMutability::Pure)),
+		magicVarDecl("require", TypeProvider::function(TypePointers{TypeProvider::boolean(), TypeProvider::magic(MagicType::Kind::Error)}, TypePointers{}, strings{2, ""}, strings{}, FunctionType::Kind::Require, StateMutability::Pure)),
 		magicVarDecl("revert", TypeProvider::function(strings(), strings(), FunctionType::Kind::Revert, StateMutability::Pure)),
 		magicVarDecl("revert", TypeProvider::function(strings{"string memory"}, strings(), FunctionType::Kind::Revert, StateMutability::Pure)),
 		magicVarDecl("ripemd160", TypeProvider::function(strings{"bytes memory"}, strings{"bytes20"}, FunctionType::Kind::RIPEMD160, StateMutability::Pure)),
@@ -103,11 +109,19 @@ inline vector<shared_ptr<MagicVariableDeclaration const>> constructMagicVariable
 			FunctionType::Options::withArbitraryParameters()
 		)),
 	};
+
+	if (_evmVersion >= langutil::EVMVersion::cancun())
+		magicVariableDeclarations.push_back(
+			magicVarDecl("blobhash", TypeProvider::function(strings{"uint256"}, strings{"bytes32"}, FunctionType::Kind::BlobHash, StateMutability::View))
+		);
+
+	return magicVariableDeclarations;
 }
 
 }
 
-GlobalContext::GlobalContext(): m_magicVariables{constructMagicVariables()}
+GlobalContext::GlobalContext(langutil::EVMVersion _evmVersion):
+	m_magicVariables{constructMagicVariables(_evmVersion)}
 {
 }
 
@@ -116,9 +130,9 @@ void GlobalContext::setCurrentContract(ContractDefinition const& _contract)
 	m_currentContract = &_contract;
 }
 
-vector<Declaration const*> GlobalContext::declarations() const
+std::vector<Declaration const*> GlobalContext::declarations() const
 {
-	vector<Declaration const*> declarations;
+	std::vector<Declaration const*> declarations;
 	declarations.reserve(m_magicVariables.size());
 	for (ASTPointer<MagicVariableDeclaration const> const& variable: m_magicVariables)
 		declarations.push_back(variable.get());
@@ -133,7 +147,7 @@ MagicVariableDeclaration const* GlobalContext::currentThis() const
 		if (m_currentContract)
 			type = TypeProvider::contract(*m_currentContract);
 		m_thisPointer[m_currentContract] =
-			make_shared<MagicVariableDeclaration>(magicVariableToID("this"), "this", type);
+			std::make_shared<MagicVariableDeclaration>(magicVariableToID("this"), "this", type);
 	}
 	return m_thisPointer[m_currentContract].get();
 }
@@ -146,7 +160,7 @@ MagicVariableDeclaration const* GlobalContext::currentSuper() const
 		if (m_currentContract)
 			type = TypeProvider::typeType(TypeProvider::contract(*m_currentContract, true));
 		m_superPointer[m_currentContract] =
-			make_shared<MagicVariableDeclaration>(magicVariableToID("super"), "super", type);
+			std::make_shared<MagicVariableDeclaration>(magicVariableToID("super"), "super", type);
 	}
 	return m_superPointer[m_currentContract].get();
 }

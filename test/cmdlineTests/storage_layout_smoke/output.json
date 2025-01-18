@@ -1,1 +1,17 @@
-{"contracts":{"fileA":{"A":{"storageLayout":{"storage":[],"types":null}}}},"sources":{"fileA":{"id":0}}}
+{
+    "contracts": {
+        "fileA": {
+            "A": {
+                "storageLayout": {
+                    "storage": [],
+                    "types": null
+                }
+            }
+        }
+    },
+    "sources": {
+        "fileA": {
+            "id": 0
+        }
+    }
+}

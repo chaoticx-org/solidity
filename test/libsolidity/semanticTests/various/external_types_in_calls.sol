@@ -22,8 +22,8 @@ contract C {
         return C1(address(9));
     }
 }
-
 // ----
 // test() -> 9, 7
-// gas legacy: 129760
+// gas legacy: 80314
+// gas legacy code: 47400
 // t2() -> 9

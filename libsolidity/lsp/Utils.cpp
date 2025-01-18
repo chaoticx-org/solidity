@@ -30,28 +30,27 @@ namespace solidity::lsp
 
 using namespace frontend;
 using namespace langutil;
-using namespace std;
 
-optional<LineColumn> parseLineColumn(Json::Value const& _lineColumn)
+std::optional<LineColumn> parseLineColumn(Json const& _lineColumn)
 {
-	if (_lineColumn.isObject() && _lineColumn["line"].isInt() && _lineColumn["character"].isInt())
-		return LineColumn{_lineColumn["line"].asInt(), _lineColumn["character"].asInt()};
+	if (_lineColumn.is_object() && _lineColumn["line"].is_number_integer() && _lineColumn["character"].is_number_integer())
+		return LineColumn{_lineColumn["line"].get<int>(), _lineColumn["character"].get<int>()};
 	else
-		return nullopt;
+		return std::nullopt;
 }
 
-Json::Value toJson(LineColumn const& _pos)
+Json toJson(LineColumn const& _pos)
 {
-	Json::Value json = Json::objectValue;
-	json["line"] = max(_pos.line, 0);
-	json["character"] = max(_pos.column, 0);
+	Json json;
+	json["line"] = std::max(_pos.line, 0);
+	json["character"] = std::max(_pos.column, 0);
 
 	return json;
 }
 
-Json::Value toJsonRange(LineColumn const& _start, LineColumn const& _end)
+Json toJsonRange(LineColumn const& _start, LineColumn const& _end)
 {
-	Json::Value json;
+	Json json;
 	json["start"] = toJson(_start);
 	json["end"] = toJson(_end);
 	return json;
@@ -70,10 +69,10 @@ Declaration const* referencedDeclaration(Expression const* _expression)
 	return nullptr;
 }
 
-optional<SourceLocation> declarationLocation(Declaration const* _declaration)
+std::optional<SourceLocation> declarationLocation(Declaration const* _declaration)
 {
 	if (!_declaration)
-		return nullopt;
+		return std::nullopt;
 
 	if (_declaration->nameLocation().isValid())
 		return _declaration->nameLocation();
@@ -81,43 +80,43 @@ optional<SourceLocation> declarationLocation(Declaration const* _declaration)
 	if (_declaration->location().isValid())
 		return _declaration->location();
 
-	return nullopt;
+	return std::nullopt;
 }
 
-optional<SourceLocation> parsePosition(
+std::optional<SourceLocation> parsePosition(
 	FileRepository const& _fileRepository,
-	string const& _sourceUnitName,
-	Json::Value const& _position
+	std::string const& _sourceUnitName,
+	Json const& _position
 )
 {
 	if (!_fileRepository.sourceUnits().count(_sourceUnitName))
-		return nullopt;
+		return std::nullopt;
 
-	if (optional<LineColumn> lineColumn = parseLineColumn(_position))
-		if (optional<int> const offset = CharStream::translateLineColumnToPosition(
+	if (std::optional<LineColumn> lineColumn = parseLineColumn(_position))
+		if (std::optional<int> const offset = CharStream::translateLineColumnToPosition(
 			_fileRepository.sourceUnits().at(_sourceUnitName),
 			*lineColumn
 		))
-			return SourceLocation{*offset, *offset, make_shared<string>(_sourceUnitName)};
-	return nullopt;
+			return SourceLocation{*offset, *offset, std::make_shared<std::string>(_sourceUnitName)};
+	return std::nullopt;
 }
 
-optional<SourceLocation> parseRange(FileRepository const& _fileRepository, string const& _sourceUnitName, Json::Value const& _range)
+std::optional<SourceLocation> parseRange(FileRepository const& _fileRepository, std::string const& _sourceUnitName, Json const& _range)
 {
-	if (!_range.isObject())
-		return nullopt;
-	optional<SourceLocation> start = parsePosition(_fileRepository, _sourceUnitName, _range["start"]);
-	optional<SourceLocation> end = parsePosition(_fileRepository, _sourceUnitName, _range["end"]);
+	if (!_range.is_object())
+		return std::nullopt;
+	std::optional<SourceLocation> start = parsePosition(_fileRepository, _sourceUnitName, _range["start"]);
+	std::optional<SourceLocation> end = parsePosition(_fileRepository, _sourceUnitName, _range["end"]);
 	if (!start || !end)
-		return nullopt;
+		return std::nullopt;
 	solAssert(*start->sourceName == *end->sourceName);
 	start->end = end->end;
 	return start;
 }
 
-string stripFileUriSchemePrefix(string const& _path)
+std::string stripFileUriSchemePrefix(std::string const& _path)
 {
-	regex const windowsDriveLetterPath("^file:///[a-zA-Z]:/");
+	std::regex const windowsDriveLetterPath("^file:///[a-zA-Z]:/");
 	if (regex_search(_path, windowsDriveLetterPath))
 		return _path.substr(8);
 	if (_path.find("file://") == 0)

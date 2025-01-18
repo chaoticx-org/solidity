@@ -2,8 +2,7 @@
   "absolutePath": "a",
   "id": 5,
   "nodeType": "SourceUnit",
-  "nodes":
-  [
+  "nodes": [
     {
       "abstract": false,
       "baseContracts": [],
@@ -15,19 +14,17 @@
       "nodeType": "ContractDefinition",
       "nodes": [],
       "src": "0:14:1",
-      "usedErrors": []
+      "usedErrors": [],
+      "usedEvents": []
     },
     {
       "abstract": false,
-      "baseContracts":
-      [
+      "baseContracts": [
         {
-          "baseName":
-          {
+          "baseName": {
             "id": 2,
             "name": "C1",
-            "nameLocations":
-            [
+            "nameLocations": [
               "30:2:1"
             ],
             "nodeType": "IdentifierPath",
@@ -46,7 +43,8 @@
       "nodeType": "ContractDefinition",
       "nodes": [],
       "src": "15:20:1",
-      "usedErrors": []
+      "usedErrors": [],
+      "usedEvents": []
     }
   ],
   "src": "0:36:1"

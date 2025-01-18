@@ -17,6 +17,7 @@
 // SPDX-License-Identifier: GPL-3.0
 
 #include <libsolidity/lsp/FileRepository.h>
+#include <libsolidity/lsp/Transport.h>
 #include <libsolidity/lsp/Utils.h>
 
 #include <libsolutil/StringUtils.h>
@@ -25,12 +26,14 @@
 #include <range/v3/algorithm/none_of.hpp>
 #include <range/v3/range/conversion.hpp>
 #include <range/v3/view/transform.hpp>
+#include <boost/algorithm/string/predicate.hpp>
 
 #include <regex>
 
 #include <boost/algorithm/string/predicate.hpp>
 
-using namespace std;
+#include <fmt/format.h>
+
 using namespace solidity;
 using namespace solidity::lsp;
 using namespace solidity::frontend;
@@ -50,15 +53,15 @@ void FileRepository::setIncludePaths(std::vector<boost::filesystem::path> _paths
 	m_includePaths = std::move(_paths);
 }
 
-string FileRepository::sourceUnitNameToUri(string const& _sourceUnitName) const
+std::string FileRepository::sourceUnitNameToUri(std::string const& _sourceUnitName) const
 {
-	regex const windowsDriveLetterPath("^[a-zA-Z]:/");
+	std::regex const windowsDriveLetterPath("^[a-zA-Z]:/");
 
-	auto const ensurePathIsUnixLike = [&](string inputPath) -> string {
+	auto const ensurePathIsUnixLike = [&](std::string inputPath) -> std::string {
 		if (!regex_search(inputPath, windowsDriveLetterPath))
 			return inputPath;
 		else
-			return "/" + move(inputPath);
+			return "/" + std::move(inputPath);
 	};
 
 	if (m_sourceUnitNamesToUri.count(_sourceUnitName))
@@ -82,16 +85,18 @@ string FileRepository::sourceUnitNameToUri(string const& _sourceUnitName) const
 		return "file:///" + _sourceUnitName;
 }
 
-string FileRepository::uriToSourceUnitName(string const& _path) const
+std::string FileRepository::uriToSourceUnitName(std::string const& _path) const
 {
+	lspRequire(boost::algorithm::starts_with(_path, "file://"), ErrorCode::InternalError, "URI must start with file://");
 	return stripFileUriSchemePrefix(_path);
 }
 
-void FileRepository::setSourceByUri(string const& _uri, string _source)
+void FileRepository::setSourceByUri(std::string const& _uri, std::string _source)
 {
 	// This is needed for uris outside the base path. It can lead to collisions,
 	// but we need to mostly rewrite this in a future version anyway.
 	auto sourceUnitName = uriToSourceUnitName(_uri);
+	lspDebug(fmt::format("FileRepository.setSourceByUri({}): {}", _uri, _source));
 	m_sourceUnitNamesToUri.emplace(sourceUnitName, _uri);
 	m_sourceCodes[sourceUnitName] = std::move(_source);
 }
@@ -104,9 +109,9 @@ Result<boost::filesystem::path> FileRepository::tryResolvePath(std::string const
 	)
 		return boost::filesystem::path(_strippedSourceUnitName);
 
-	vector<boost::filesystem::path> candidates;
-	vector<reference_wrapper<boost::filesystem::path const>> prefixes = {m_basePath};
-	prefixes += (m_includePaths | ranges::to<vector<reference_wrapper<boost::filesystem::path const>>>);
+	std::vector<boost::filesystem::path> candidates;
+	std::vector<std::reference_wrapper<boost::filesystem::path const>> prefixes = {m_basePath};
+	prefixes += (m_includePaths | ranges::to<std::vector<std::reference_wrapper<boost::filesystem::path const>>>);
 	auto const defaultInclude = m_basePath / "node_modules";
 	if (m_includePaths.empty())
 		prefixes.emplace_back(defaultInclude);
@@ -118,7 +123,7 @@ Result<boost::filesystem::path> FileRepository::tryResolvePath(std::string const
 		boost::filesystem::path canonicalPath = boost::filesystem::path(prefix) / boost::filesystem::path(_strippedSourceUnitName);
 
 		if (boost::filesystem::exists(canonicalPath))
-			candidates.push_back(move(canonicalPath));
+			candidates.push_back(std::move(canonicalPath));
 	}
 
 	if (candidates.empty())
@@ -142,7 +147,7 @@ Result<boost::filesystem::path> FileRepository::tryResolvePath(std::string const
 	return candidates[0];
 }
 
-frontend::ReadCallback::Result FileRepository::readFile(string const& _kind, string const& _sourceUnitName)
+frontend::ReadCallback::Result FileRepository::readFile(std::string const& _kind, std::string const& _sourceUnitName)
 {
 	solAssert(
 		_kind == ReadCallback::kindString(ReadCallback::Kind::ReadFile),
@@ -155,7 +160,7 @@ frontend::ReadCallback::Result FileRepository::readFile(string const& _kind, str
 		if (m_sourceCodes.count(_sourceUnitName))
 			return ReadCallback::Result{true, m_sourceCodes.at(_sourceUnitName)};
 
-		string const strippedSourceUnitName = stripFileUriSchemePrefix(_sourceUnitName);
+		std::string const strippedSourceUnitName = stripFileUriSchemePrefix(_sourceUnitName);
 		Result<boost::filesystem::path> const resolvedPath = tryResolvePath(strippedSourceUnitName);
 		if (!resolvedPath.message().empty())
 			return ReadCallback::Result{false, resolvedPath.message()};
@@ -163,15 +168,11 @@ frontend::ReadCallback::Result FileRepository::readFile(string const& _kind, str
 		auto contents = readFileAsString(resolvedPath.get());
 		solAssert(m_sourceCodes.count(_sourceUnitName) == 0, "");
 		m_sourceCodes[_sourceUnitName] = contents;
-		return ReadCallback::Result{true, move(contents)};
-	}
-	catch (std::exception const& _exception)
-	{
-		return ReadCallback::Result{false, "Exception in read callback: " + boost::diagnostic_information(_exception)};
+		return ReadCallback::Result{true, std::move(contents)};
 	}
 	catch (...)
 	{
-		return ReadCallback::Result{false, "Unknown exception in read callback: " + boost::current_exception_diagnostic_information()};
+		return ReadCallback::Result{false, "Exception in read callback: " + boost::current_exception_diagnostic_information()};
 	}
 }
 

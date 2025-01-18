@@ -28,7 +28,7 @@ if(PEDANTIC)
 endif()
 
 # Prevent the path of the source directory from ending up in the binary via __FILE__ macros.
-eth_add_cxx_compiler_flag_if_supported("-fmacro-prefix-map=${CMAKE_SOURCE_DIR}=/solidity")
+eth_add_cxx_compiler_flag_if_supported("-fmacro-prefix-map=${PROJECT_SOURCE_DIR}=/solidity")
 
 # -Wpessimizing-move warns when a call to std::move would prevent copy elision
 # if the argument was not wrapped in a call.  This happens when moving a local
@@ -65,6 +65,13 @@ if (("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU") OR ("${CMAKE_CXX_COMPILER_ID}" MA
 		if(WEXTRA_SEMI)
 			add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wextra-semi>)
 		endif()
+		# See https://gcc.gnu.org/git/gitweb.cgi?p=gcc.git;h=6b927b1297e66e26e62e722bf15c921dcbbd25b9
+		check_cxx_compiler_flag(-Wno-dangling-reference WNO_DANGLING_REFERENCE)
+		if (WNO_DANGLING_REFERENCE)
+            add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-dangling-reference>)
+		endif()
+
+
 		eth_add_cxx_compiler_flag_if_supported(-Wfinal-dtor-non-final-class)
 		eth_add_cxx_compiler_flag_if_supported(-Wnewline-eof)
 		eth_add_cxx_compiler_flag_if_supported(-Wsuggest-destructor-override)
@@ -164,25 +171,25 @@ elseif (DEFINED MSVC)
 	# CMAKE_CXX_FLAGS_RELWITHDEBINFO for GCC/Clang does not include NDEBUG
 	string(REPLACE "/DNDEBUG" " " CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
 
-	add_compile_options(/MP)						# enable parallel compilation
-	add_compile_options(/EHsc)						# specify Exception Handling Model in msvc
+	add_compile_options(/MP)                              # enable parallel compilation
+	add_compile_options(/EHsc)                            # specify Exception Handling Model in msvc
 	if(PEDANTIC)
-		add_compile_options(/WX)					# enable warnings-as-errors
+		add_compile_options(/WX)                          # enable warnings-as-errors
 	endif()
-	add_compile_options(/wd4068)					# disable unknown pragma warning (4068)
-	add_compile_options(/wd4996)					# disable unsafe function warning (4996)
-	add_compile_options(/wd4503)					# disable decorated name length exceeded, name was truncated (4503)
-	add_compile_options(/wd4267)					# disable conversion from 'size_t' to 'type', possible loss of data (4267)
-	add_compile_options(/wd4180)					# disable qualifier applied to function type has no meaning; ignored (4180)
-	add_compile_options(/wd4290)					# disable C++ exception specification ignored except to indicate a function is not __declspec(nothrow) (4290)
-	add_compile_options(/wd4244)					# disable conversion from 'type1' to 'type2', possible loss of data (4244)
-	add_compile_options(/wd4800)					# disable forcing value to bool 'true' or 'false' (performance warning) (4800)
-	add_compile_options(-D_WIN32_WINNT=0x0600)		# declare Windows Vista API requirement
-	add_compile_options(-DNOMINMAX)					# undefine windows.h MAX && MIN macros cause it cause conflicts with std::min && std::max functions
-	add_compile_options(/utf-8)						# enable utf-8 encoding (solves warning 4819)
-	add_compile_options(-DBOOST_REGEX_NO_LIB)		# disable automatic boost::regex library selection
-	add_compile_options(-D_REGEX_MAX_STACK_COUNT=200000L)	# increase std::regex recursion depth limit
-	add_compile_options(/permissive-)				# specify standards conformance mode to the compiler
+	add_compile_options(/wd4068)                          # disable unknown pragma warning (4068)
+	add_compile_options(/wd4996)                          # disable unsafe function warning (4996)
+	add_compile_options(/wd4503)                          # disable decorated name length exceeded, name was truncated (4503)
+	add_compile_options(/wd4267)                          # disable conversion from 'size_t' to 'type', possible loss of data (4267)
+	add_compile_options(/wd4180)                          # disable qualifier applied to function type has no meaning; ignored (4180)
+	add_compile_options(/wd4290)                          # disable C++ exception specification ignored except to indicate a function is not __declspec(nothrow) (4290)
+	add_compile_options(/wd4244)                          # disable conversion from 'type1' to 'type2', possible loss of data (4244)
+	add_compile_options(/wd4800)                          # disable forcing value to bool 'true' or 'false' (performance warning) (4800)
+	add_compile_options(-D_WIN32_WINNT=0x0600)            # declare Windows Vista API requirement
+	add_compile_options(-DNOMINMAX)                       # undefine windows.h MAX && MIN macros cause it cause conflicts with std::min && std::max functions
+	add_compile_options(/utf-8)                           # enable utf-8 encoding (solves warning 4819)
+	add_compile_options(-DBOOST_REGEX_NO_LIB)             # disable automatic boost::regex library selection
+	add_compile_options(-D_REGEX_MAX_STACK_COUNT=200000L) # increase std::regex recursion depth limit
+	add_compile_options(/permissive-)                     # specify standards conformance mode to the compiler
 
 	# disable empty object file warning
 	set(CMAKE_STATIC_LINKER_FLAGS "${CMAKE_STATIC_LINKER_FLAGS} /ignore:4221")
@@ -253,20 +260,3 @@ if(COVERAGE)
 	endif()
 	add_compile_options(-g --coverage)
 endif()
-
-# SMT Solvers integration
-option(USE_Z3 "Allow compiling with Z3 SMT solver integration" ON)
-if(UNIX AND NOT APPLE)
-	option(USE_Z3_DLOPEN "Dynamically load the Z3 SMT solver instead of linking against it." OFF)
-endif()
-option(USE_CVC4 "Allow compiling with CVC4 SMT solver integration" ON)
-
-if (("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU") OR ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang"))
-	option(USE_LD_GOLD "Use GNU gold linker" ON)
-	if (USE_LD_GOLD)
-		execute_process(COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=gold -Wl,--version ERROR_QUIET OUTPUT_VARIABLE LD_VERSION)
-		if ("${LD_VERSION}" MATCHES "GNU gold")
-			set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fuse-ld=gold")
-		endif ()
-	endif ()
-endif ()

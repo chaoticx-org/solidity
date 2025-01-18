@@ -28,11 +28,10 @@
 
 #include <range/v3/algorithm/all_of.hpp>
 
-using namespace std;
 using namespace solidity;
 using namespace solidity::yul;
 
-void Rematerialiser::run(Dialect const& _dialect, Block& _ast, set<YulString> _varsToAlwaysRematerialize, bool _onlySelectedVariables)
+void Rematerialiser::run(Dialect const& _dialect, Block& _ast, std::set<YulName> _varsToAlwaysRematerialize, bool _onlySelectedVariables)
 {
 	Rematerialiser{_dialect, _ast, std::move(_varsToAlwaysRematerialize), _onlySelectedVariables}(_ast);
 }
@@ -40,11 +39,11 @@ void Rematerialiser::run(Dialect const& _dialect, Block& _ast, set<YulString> _v
 Rematerialiser::Rematerialiser(
 	Dialect const& _dialect,
 	Block& _ast,
-	set<YulString> _varsToAlwaysRematerialize,
+	std::set<YulName> _varsToAlwaysRematerialize,
 	bool _onlySelectedVariables
 ):
 	DataFlowAnalyzer(_dialect, MemoryAndStorage::Ignore),
-	m_referenceCounts(ReferencesCounter::countReferences(_ast)),
+	m_referenceCounts(VariableReferencesCounter::countReferences(_ast)),
 	m_varsToAlwaysRematerialize(std::move(_varsToAlwaysRematerialize)),
 	m_onlySelectedVariables(_onlySelectedVariables)
 {
@@ -52,10 +51,10 @@ Rematerialiser::Rematerialiser(
 
 void Rematerialiser::visit(Expression& _e)
 {
-	if (holds_alternative<Identifier>(_e))
+	if (std::holds_alternative<Identifier>(_e))
 	{
 		Identifier& identifier = std::get<Identifier>(_e);
-		YulString name = identifier.name;
+		YulName name = identifier.name;
 		if (AssignedValue const* value = variableValue(name))
 		{
 			assertThrow(value->value, OptimizerException, "");
@@ -77,7 +76,9 @@ void Rematerialiser::visit(Expression& _e)
 				{
 					// update reference counts
 					m_referenceCounts[name]--;
-					for (auto const& ref: ReferencesCounter::countReferences(*value->value))
+					for (auto const& ref: VariableReferencesCounter::countReferences(
+						*value->value
+					))
 						m_referenceCounts[ref.first] += ref.second;
 					_e = (ASTCopier{}).translate(*value->value);
 				}
@@ -89,14 +90,14 @@ void Rematerialiser::visit(Expression& _e)
 
 void LiteralRematerialiser::visit(Expression& _e)
 {
-	if (holds_alternative<Identifier>(_e))
+	if (std::holds_alternative<Identifier>(_e))
 	{
 		Identifier& identifier = std::get<Identifier>(_e);
-		YulString name = identifier.name;
+		YulName name = identifier.name;
 		if (AssignedValue const* value = variableValue(name))
 		{
 			assertThrow(value->value, OptimizerException, "");
-			if (holds_alternative<Literal>(*value->value))
+			if (std::holds_alternative<Literal>(*value->value))
 				_e = *value->value;
 		}
 	}

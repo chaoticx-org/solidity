@@ -16,12 +16,15 @@ contract ClientReceipt {
 }
 // ----
 // constructor(), 2000 wei ->
-// gas irOptimized: 173106
-// gas legacy: 235195
-// gas legacyOptimized: 176766
+// gas irOptimized: 114353
+// gas irOptimized code: 58800
+// gas legacy: 118617
+// gas legacy code: 111400
+// gas legacyOptimized: 114067
+// gas legacyOptimized code: 59800
 // balance -> 1500
 // gas irOptimized: 191881
 // gas legacy: 235167
 // gas legacyOptimized: 180756
-// getAddress() -> 0xf01f7809444bd9a93a854361c6fae3f23d9e23db
-// balance: 0xf01f7809444bd9a93a854361c6fae3f23d9e23db -> 500
+// getAddress() -> 0x137aa4dfc0911524504fcd4d98501f179bc13b4a
+// balance: 0x137aa4dfc0911524504fcd4d98501f179bc13b4a -> 500

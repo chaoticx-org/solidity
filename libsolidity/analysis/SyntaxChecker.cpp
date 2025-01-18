@@ -32,7 +32,6 @@
 
 #include <string>
 
-using namespace std;
 using namespace solidity;
 using namespace solidity::langutil;
 using namespace solidity::frontend;
@@ -55,17 +54,17 @@ void SyntaxChecker::endVisit(SourceUnit const& _sourceUnit)
 {
 	if (!m_versionPragmaFound)
 	{
-		string errorString("Source file does not specify required compiler version!");
-		SemVerVersion recommendedVersion{string(VersionString)};
+		std::string errorString("Source file does not specify required compiler version!");
+		SemVerVersion recommendedVersion{std::string(VersionString)};
 		if (!recommendedVersion.isPrerelease())
 			errorString +=
 				" Consider adding \"pragma solidity ^" +
-				to_string(recommendedVersion.major()) +
-				string(".") +
-				to_string(recommendedVersion.minor()) +
-				string(".") +
-				to_string(recommendedVersion.patch()) +
-				string(";\"");
+				std::to_string(recommendedVersion.major()) +
+				std::string(".") +
+				std::to_string(recommendedVersion.minor()) +
+				std::string(".") +
+				std::to_string(recommendedVersion.patch()) +
+				std::string(";\"");
 
 		// when reporting the warning, print the source name only
 		m_errorReporter.warning(3420_error, {-1, -1, _sourceUnit.location().sourceName}, errorString);
@@ -84,7 +83,7 @@ bool SyntaxChecker::visit(PragmaDirective const& _pragma)
 	else if (_pragma.literals()[0] == "experimental")
 	{
 		solAssert(m_sourceUnit, "");
-		vector<string> literals(_pragma.literals().begin() + 1, _pragma.literals().end());
+		std::vector<std::string> literals(_pragma.literals().begin() + 1, _pragma.literals().end());
 		if (literals.empty())
 			m_errorReporter.syntaxError(
 				9679_error,
@@ -99,7 +98,7 @@ bool SyntaxChecker::visit(PragmaDirective const& _pragma)
 			);
 		else
 		{
-			string const literal = literals[0];
+			std::string const literal = literals[0];
 			if (literal.empty())
 				m_errorReporter.syntaxError(3250_error, _pragma.location(), "Empty experimental feature name is invalid.");
 			else if (!ExperimentalFeatureNames.count(literal))
@@ -135,7 +134,7 @@ bool SyntaxChecker::visit(PragmaDirective const& _pragma)
 		solAssert(m_sourceUnit, "");
 		if (
 			_pragma.literals().size() != 2 ||
-			!set<string>{"v1", "v2"}.count(_pragma.literals()[1])
+			!std::set<std::string>{"v1", "v2"}.count(_pragma.literals()[1])
 		)
 			m_errorReporter.syntaxError(
 				2745_error,
@@ -153,22 +152,21 @@ bool SyntaxChecker::visit(PragmaDirective const& _pragma)
 	}
 	else if (_pragma.literals()[0] == "solidity")
 	{
-		vector<Token> tokens(_pragma.tokens().begin() + 1, _pragma.tokens().end());
-		vector<string> literals(_pragma.literals().begin() + 1, _pragma.literals().end());
-		SemVerMatchExpressionParser parser(tokens, literals);
-		auto matchExpression = parser.parse();
-		// An unparsable version pragma is an unrecoverable fatal error in the parser.
-		solAssert(matchExpression.has_value(), "");
-		static SemVerVersion const currentVersion{string(VersionString)};
-		if (!matchExpression->matches(currentVersion))
-			m_errorReporter.syntaxError(
-				3997_error,
-				_pragma.location(),
-				"Source file requires different compiler version (current compiler is " +
-				string(VersionString) + ") - note that nightly builds are considered to be "
-				"strictly less than the released version"
-			);
-		m_versionPragmaFound = true;
+		try
+		{
+			std::vector<Token> tokens(_pragma.tokens().begin() + 1, _pragma.tokens().end());
+			std::vector<std::string> literals(_pragma.literals().begin() + 1, _pragma.literals().end());
+			SemVerMatchExpressionParser parser(tokens, literals);
+			SemVerMatchExpression matchExpression = parser.parse();
+			static SemVerVersion const currentVersion{std::string(VersionString)};
+			solAssert(matchExpression.matches(currentVersion));
+			m_versionPragmaFound = true;
+		}
+		catch (SemVerError const&)
+		{
+			// An unparsable version pragma is an unrecoverable fatal error in the parser.
+			solAssert(false);
+		}
 	}
 	else
 		m_errorReporter.syntaxError(4936_error, _pragma.location(), "Unknown pragma \"" + _pragma.literals()[0] + "\"");
@@ -302,7 +300,7 @@ bool SyntaxChecker::visit(Literal const& _literal)
 
 	if (value.find("__") != ASTString::npos)
 	{
-		m_errorReporter.syntaxError(2990_error, _literal.location(), "Invalid use of underscores in number literal. Only one consecutive underscores between digits allowed.");
+		m_errorReporter.syntaxError(2990_error, _literal.location(), "Invalid use of underscores in number literal. Only one consecutive underscore between digits is allowed.");
 		return true;
 	}
 
@@ -326,9 +324,7 @@ bool SyntaxChecker::visit(Literal const& _literal)
 
 bool SyntaxChecker::visit(UnaryOperation const& _operation)
 {
-	if (_operation.getOperator() == Token::Add)
-		m_errorReporter.syntaxError(9636_error, _operation.location(), "Use of unary + is disallowed.");
-
+	solAssert(_operation.getOperator() != Token::Add);
 	return true;
 }
 
@@ -358,7 +354,7 @@ bool SyntaxChecker::visit(InlineAssembly const& _inlineAssembly)
 	if (!m_useYulOptimizer)
 		return false;
 
-	if (yul::MSizeFinder::containsMSize(_inlineAssembly.dialect(), _inlineAssembly.operations()))
+	if (yul::MSizeFinder::containsMSize(_inlineAssembly.dialect(), _inlineAssembly.operations().root()))
 		m_errorReporter.syntaxError(
 			6553_error,
 			_inlineAssembly.location(),
@@ -405,6 +401,12 @@ void SyntaxChecker::endVisit(ContractDefinition const&)
 
 bool SyntaxChecker::visit(UsingForDirective const& _usingFor)
 {
+	if (!_usingFor.usesBraces())
+		solAssert(
+			_usingFor.functionsAndOperators().size() == 1 &&
+			!std::get<1>(_usingFor.functionsAndOperators().front())
+		);
+
 	if (!m_currentContractKind && !_usingFor.typeName())
 		m_errorReporter.syntaxError(
 			8118_error,
@@ -421,7 +423,7 @@ bool SyntaxChecker::visit(UsingForDirective const& _usingFor)
 		m_errorReporter.syntaxError(
 			2854_error,
 			_usingFor.location(),
-			"Can only globally bind functions to specific types."
+			"Can only globally attach functions to specific types."
 		);
 	if (_usingFor.global() && m_currentContractKind)
 		m_errorReporter.syntaxError(
@@ -441,11 +443,13 @@ bool SyntaxChecker::visit(UsingForDirective const& _usingFor)
 
 bool SyntaxChecker::visit(FunctionDefinition const& _function)
 {
-	solAssert(_function.isFree() == (m_currentContractKind == std::nullopt), "");
+	if (m_sourceUnit && m_sourceUnit->experimentalSolidity())
+		// Handled in experimental::SyntaxRestrictor instead.
+		return true;
 
 	if (!_function.isFree() && !_function.isConstructor() && _function.noVisibilitySpecified())
 	{
-		string suggestedVisibility =
+		std::string suggestedVisibility =
 			_function.isFallback() ||
 			_function.isReceive() ||
 			m_currentContractKind == ContractKind::Interface
@@ -495,4 +499,14 @@ bool SyntaxChecker::visit(StructDefinition const& _struct)
 		m_errorReporter.syntaxError(5306_error, _struct.location(), "Defining empty structs is disallowed.");
 
 	return true;
+}
+
+bool SyntaxChecker::visitNode(ASTNode const& _node)
+{
+	if (_node.experimentalSolidityOnly())
+	{
+		solAssert(m_sourceUnit);
+		solAssert(m_sourceUnit->experimentalSolidity());
+	}
+	return ASTConstVisitor::visitNode(_node);
 }

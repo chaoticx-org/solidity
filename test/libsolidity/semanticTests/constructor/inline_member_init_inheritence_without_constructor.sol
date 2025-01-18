@@ -15,7 +15,7 @@ contract Derived is Base {
     }
 }
 // ====
-// compileToEwasm: also
+// bytecodeFormat: legacy,>=EOFv1
 // ----
 // getBMember() -> 5
 // getDMember() -> 6

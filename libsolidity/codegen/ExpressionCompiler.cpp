@@ -43,7 +43,6 @@
 #include <numeric>
 #include <utility>
 
-using namespace std;
 using namespace solidity;
 using namespace solidity::evmasm;
 using namespace solidity::frontend;
@@ -71,7 +70,7 @@ Type const* closestType(Type const* _type, Type const* _targetType, bool _isShif
 				solAssert(tempComponents[i], "");
 			}
 		}
-		return TypeProvider::tuple(move(tempComponents));
+		return TypeProvider::tuple(std::move(tempComponents));
 	}
 	else
 		return _targetType->dataStoredIn(DataLocation::Storage) ? _type->mobileType() : _targetType;
@@ -109,7 +108,10 @@ void ExpressionCompiler::appendStateVariableInitialization(VariableDeclaration c
 	if (_varDecl.immutable())
 		ImmutableItem(m_context, _varDecl).storeValue(*type, _varDecl.location(), true);
 	else
+	{
+		solAssert(_varDecl.referenceLocation() != VariableDeclaration::Location::Transient);
 		StorageItem(m_context, _varDecl).storeValue(*type, _varDecl.location(), true);
+	}
 }
 
 void ExpressionCompiler::appendConstStateVariableAccessor(VariableDeclaration const& _varDecl)
@@ -148,6 +150,7 @@ void ExpressionCompiler::appendStateVariableAccessor(VariableDeclaration const& 
 		if (auto mappingType = dynamic_cast<MappingType const*>(returnType))
 		{
 			solAssert(CompilerUtils::freeMemoryPointer >= 0x40, "");
+			solAssert(_varDecl.referenceLocation() != VariableDeclaration::Location::Transient);
 
 			// pop offset
 			m_context << Instruction::POP;
@@ -197,6 +200,8 @@ void ExpressionCompiler::appendStateVariableAccessor(VariableDeclaration const& 
 		}
 		else if (auto arrayType = dynamic_cast<ArrayType const*>(returnType))
 		{
+			solAssert(_varDecl.referenceLocation() != VariableDeclaration::Location::Transient);
+
 			// pop offset
 			m_context << Instruction::POP;
 			utils().copyToStackTop(static_cast<unsigned>(paramTypes.size() - i + 1), 1);
@@ -230,6 +235,7 @@ void ExpressionCompiler::appendStateVariableAccessor(VariableDeclaration const& 
 	solAssert(returnTypes.size() >= 1, "");
 	if (StructType const* structType = dynamic_cast<StructType const*>(returnType))
 	{
+		solAssert(_varDecl.referenceLocation() != VariableDeclaration::Location::Transient);
 		solAssert(!_varDecl.immutable(), "");
 		// remove offset
 		m_context << Instruction::POP;
@@ -242,7 +248,7 @@ void ExpressionCompiler::appendStateVariableAccessor(VariableDeclaration const& 
 			if (auto arrayType = dynamic_cast<ArrayType const*>(returnTypes[i]))
 				if (!arrayType->isByteArrayOrString())
 					continue;
-			pair<u256, unsigned> const& offsets = structType->storageOffsetsOfMember(names[i]);
+			std::pair<u256, unsigned> const& offsets = structType->storageOffsetsOfMember(names[i]);
 			m_context << Instruction::DUP1 << u256(offsets.first) << Instruction::ADD << u256(offsets.second);
 			Type const* memberType = structType->memberType(names[i]);
 			StorageItem(m_context, *memberType).retrieveValue(SourceLocation(), true);
@@ -259,6 +265,8 @@ void ExpressionCompiler::appendStateVariableAccessor(VariableDeclaration const& 
 		solAssert(returnTypes.size() == 1, "");
 		if (_varDecl.immutable())
 			ImmutableItem(m_context, _varDecl).retrieveValue(SourceLocation());
+		else if (_varDecl.referenceLocation() == VariableDeclaration::Location::Transient)
+			TransientStorageItem(m_context, *returnType).retrieveValue(SourceLocation(), true);
 		else
 			StorageItem(m_context, *returnType).retrieveValue(SourceLocation(), true);
 		utils().convertType(*returnType, *returnTypes.front());
@@ -370,7 +378,7 @@ bool ExpressionCompiler::visit(TupleExpression const& _tuple)
 		ArrayType const& arrayType = dynamic_cast<ArrayType const&>(*_tuple.annotation().type);
 
 		solAssert(!arrayType.isDynamicallySized(), "Cannot create dynamically sized inline array.");
-		utils().allocateMemory(max(u256(32u), arrayType.memoryDataSize()));
+		utils().allocateMemory(std::max(u256(32u), arrayType.memoryDataSize()));
 		m_context << Instruction::DUP1;
 
 		for (auto const& component: _tuple.components())
@@ -383,7 +391,7 @@ bool ExpressionCompiler::visit(TupleExpression const& _tuple)
 	}
 	else
 	{
-		vector<unique_ptr<LValue>> lvalues;
+		std::vector<std::unique_ptr<LValue>> lvalues;
 		for (auto const& component: _tuple.components())
 			if (component)
 			{
@@ -391,17 +399,17 @@ bool ExpressionCompiler::visit(TupleExpression const& _tuple)
 				if (_tuple.annotation().willBeWrittenTo)
 				{
 					solAssert(!!m_currentLValue, "");
-					lvalues.push_back(move(m_currentLValue));
+					lvalues.push_back(std::move(m_currentLValue));
 				}
 			}
 			else if (_tuple.annotation().willBeWrittenTo)
-				lvalues.push_back(unique_ptr<LValue>());
+				lvalues.push_back(std::unique_ptr<LValue>());
 		if (_tuple.annotation().willBeWrittenTo)
 		{
 			if (_tuple.components().size() == 1)
-				m_currentLValue = move(lvalues[0]);
+				m_currentLValue = std::move(lvalues[0]);
 			else
-				m_currentLValue = make_unique<TupleObject>(m_context, move(lvalues));
+				m_currentLValue = std::make_unique<TupleObject>(m_context, std::move(lvalues));
 		}
 	}
 	return false;
@@ -410,6 +418,38 @@ bool ExpressionCompiler::visit(TupleExpression const& _tuple)
 bool ExpressionCompiler::visit(UnaryOperation const& _unaryOperation)
 {
 	CompilerContext::LocationSetter locationSetter(m_context, _unaryOperation);
+
+	FunctionDefinition const* function = *_unaryOperation.annotation().userDefinedFunction;
+	if (function)
+	{
+		solAssert(function->isFree());
+
+		FunctionType const* functionType = _unaryOperation.userDefinedFunctionType();
+		solAssert(functionType);
+		solAssert(functionType->parameterTypes().size() == 1);
+		solAssert(functionType->returnParameterTypes().size() == 1);
+		solAssert(functionType->kind() == FunctionType::Kind::Internal);
+
+		evmasm::AssemblyItem returnLabel = m_context.pushNewTag();
+		acceptAndConvert(
+			_unaryOperation.subExpression(),
+			*functionType->parameterTypes()[0],
+			false // _cleanupNeeded
+		);
+
+		m_context << m_context.functionEntryLabel(*function).pushTag();
+		m_context.appendJump(evmasm::AssemblyItem::JumpType::IntoFunction);
+		m_context << returnLabel;
+
+		unsigned parameterSize = CompilerUtils::sizeOnStack(functionType->parameterTypes());
+		unsigned returnParametersSize = CompilerUtils::sizeOnStack(functionType->returnParameterTypes());
+
+		// callee adds return parameters, but removes arguments and return label
+		m_context.adjustStackOffset(static_cast<int>(returnParametersSize) - static_cast<int>(parameterSize) - 1);
+
+		return false;
+	}
+
 	Type const& type = *_unaryOperation.annotation().type;
 	if (type.category() == Type::Category::RationalNumber)
 	{
@@ -479,8 +519,8 @@ bool ExpressionCompiler::visit(UnaryOperation const& _unaryOperation)
 		m_currentLValue.reset();
 		break;
 	case Token::Add: // +
-		// unary add, so basically no-op
-		break;
+		// According to SyntaxChecker...
+		solAssert(false, "Use of unary + is disallowed.");
 	case Token::Sub: // -
 		solUnimplementedAssert(
 			type.category() != Type::Category::FixedPoint,
@@ -492,7 +532,7 @@ bool ExpressionCompiler::visit(UnaryOperation const& _unaryOperation)
 			m_context << u256(0) << Instruction::SUB;
 		break;
 	default:
-		solAssert(false, "Invalid unary operator: " + string(TokenTraits::toString(_unaryOperation.getOperator())));
+		solAssert(false, "Invalid unary operator: " + std::string(TokenTraits::toString(_unaryOperation.getOperator())));
 	}
 	return false;
 }
@@ -502,7 +542,42 @@ bool ExpressionCompiler::visit(BinaryOperation const& _binaryOperation)
 	CompilerContext::LocationSetter locationSetter(m_context, _binaryOperation);
 	Expression const& leftExpression = _binaryOperation.leftExpression();
 	Expression const& rightExpression = _binaryOperation.rightExpression();
-	solAssert(!!_binaryOperation.annotation().commonType, "");
+	FunctionDefinition const* function = *_binaryOperation.annotation().userDefinedFunction;
+	if (function)
+	{
+		solAssert(function->isFree());
+
+		FunctionType const* functionType = _binaryOperation.userDefinedFunctionType();
+		solAssert(functionType);
+		solAssert(functionType->parameterTypes().size() == 2);
+		solAssert(functionType->returnParameterTypes().size() == 1);
+		solAssert(functionType->kind() == FunctionType::Kind::Internal);
+
+		evmasm::AssemblyItem returnLabel = m_context.pushNewTag();
+		acceptAndConvert(
+			leftExpression,
+			*functionType->parameterTypes()[0],
+			false // _cleanupNeeded
+		);
+		acceptAndConvert(
+			rightExpression,
+			*functionType->parameterTypes()[1],
+			false // _cleanupNeeded
+		);
+
+		m_context << m_context.functionEntryLabel(*function).pushTag();
+		m_context.appendJump(evmasm::AssemblyItem::JumpType::IntoFunction);
+		m_context << returnLabel;
+
+		unsigned parameterSize = CompilerUtils::sizeOnStack(functionType->parameterTypes());
+		unsigned returnParametersSize = CompilerUtils::sizeOnStack(functionType->returnParameterTypes());
+
+		// callee adds return parameters, but removes arguments and return label
+		m_context.adjustStackOffset(static_cast<int>(returnParametersSize) - static_cast<int>(parameterSize) - 1);
+		return false;
+	}
+
+	solAssert(!!_binaryOperation.annotation().commonType);
 	Type const* commonType = _binaryOperation.annotation().commonType;
 	Token const c_op = _binaryOperation.getOperator();
 
@@ -592,14 +667,14 @@ bool ExpressionCompiler::visit(FunctionCall const& _functionCall)
 
 	TypePointers parameterTypes = functionType->parameterTypes();
 
-	vector<ASTPointer<Expression const>> const& arguments = _functionCall.sortedArguments();
+	std::vector<ASTPointer<Expression const>> const& arguments = _functionCall.sortedArguments();
 
 	if (functionCallKind == FunctionCallKind::StructConstructorCall)
 	{
 		TypeType const& type = dynamic_cast<TypeType const&>(*_functionCall.expression().annotation().type);
 		auto const& structType = dynamic_cast<StructType const&>(*type.actualType());
 
-		utils().allocateMemory(max(u256(32u), structType.memoryDataSize()));
+		utils().allocateMemory(std::max(u256(32u), structType.memoryDataSize()));
 		m_context << Instruction::DUP1;
 
 		for (unsigned i = 0; i < arguments.size(); ++i)
@@ -612,7 +687,7 @@ bool ExpressionCompiler::visit(FunctionCall const& _functionCall)
 	else
 	{
 		FunctionType const& function = *functionType;
-		if (function.bound())
+		if (function.hasBoundFirstArgument())
 			solAssert(
 				function.kind() == FunctionType::Kind::DelegateCall ||
 				function.kind() == FunctionType::Kind::Internal ||
@@ -632,32 +707,10 @@ bool ExpressionCompiler::visit(FunctionCall const& _functionCall)
 			evmasm::AssemblyItem returnLabel = m_context.pushNewTag();
 			for (unsigned i = 0; i < arguments.size(); ++i)
 				acceptAndConvert(*arguments[i], *function.parameterTypes()[i]);
-
-			{
-				bool shortcutTaken = false;
-				if (auto identifier = dynamic_cast<Identifier const*>(&_functionCall.expression()))
-				{
-					solAssert(!function.bound(), "");
-					if (auto functionDef = dynamic_cast<FunctionDefinition const*>(identifier->annotation().referencedDeclaration))
-					{
-						// Do not directly visit the identifier, because this way, we can avoid
-						// the runtime entry label to be created at the creation time context.
-						CompilerContext::LocationSetter locationSetter2(m_context, *identifier);
-						solAssert(*identifier->annotation().requiredLookup == VirtualLookup::Virtual, "");
-						utils().pushCombinedFunctionEntryLabel(
-							functionDef->resolveVirtual(m_context.mostDerivedContract()),
-							false
-						);
-						shortcutTaken = true;
-					}
-				}
-
-				if (!shortcutTaken)
-					_functionCall.expression().accept(*this);
-			}
+			_functionCall.expression().accept(*this);
 
 			unsigned parameterSize = CompilerUtils::sizeOnStack(function.parameterTypes());
-			if (function.bound())
+			if (function.hasBoundFirstArgument())
 			{
 				// stack: arg2, ..., argn, label, arg1
 				unsigned depth = parameterSize + 1;
@@ -677,7 +730,7 @@ bool ExpressionCompiler::visit(FunctionCall const& _functionCall)
 
 			unsigned returnParametersSize = CompilerUtils::sizeOnStack(function.returnParameterTypes());
 			// callee adds return parameters, but removes arguments and return label
-			m_context.adjustStackOffset(static_cast<int>(returnParametersSize - parameterSize) - 1);
+			m_context.adjustStackOffset(static_cast<int>(returnParametersSize) - static_cast<int>(parameterSize) - 1);
 			break;
 		}
 		case FunctionType::Kind::BareCall:
@@ -898,7 +951,7 @@ bool ExpressionCompiler::visit(FunctionCall const& _functionCall)
 					else
 					{
 						solAssert(paramTypes[arg - 1]->isValueType(), "");
-						if (auto functionType =	dynamic_cast<FunctionType const*>(paramTypes[arg - 1]))
+						if (auto functionType = dynamic_cast<FunctionType const*>(paramTypes[arg - 1]))
 						{
 							auto argumentType =
 								dynamic_cast<FunctionType const*>(arguments[arg-1]->annotation().type);
@@ -906,7 +959,7 @@ bool ExpressionCompiler::visit(FunctionCall const& _functionCall)
 								argumentType &&
 								functionType->kind() == FunctionType::Kind::External &&
 								argumentType->kind() == FunctionType::Kind::External &&
-								!argumentType->bound(),
+								!argumentType->hasBoundFirstArgument(),
 								""
 							);
 
@@ -946,8 +999,10 @@ bool ExpressionCompiler::visit(FunctionCall const& _functionCall)
 		}
 		case FunctionType::Kind::Error:
 		{
+			// This case is part of the ``revert <error>`` path of the codegen.
+			// For ``require(bool, <error>)`` refer to the ``Kind::Require`` case.
 			_functionCall.expression().accept(*this);
-			vector<Type const*> argumentTypes;
+			std::vector<Type const*> argumentTypes;
 			for (ASTPointer<Expression const> const& arg: _functionCall.sortedArguments())
 			{
 				arg->accept(*this);
@@ -991,9 +1046,13 @@ bool ExpressionCompiler::visit(FunctionCall const& _functionCall)
 			break;
 		}
 		case FunctionType::Kind::BlockHash:
+		case FunctionType::Kind::BlobHash:
 		{
 			acceptAndConvert(*arguments[0], *function.parameterTypes()[0], true);
-			m_context << Instruction::BLOCKHASH;
+			if (function.kind() == FunctionType::Kind::BlockHash)
+				m_context << Instruction::BLOCKHASH;
+			else
+				m_context << Instruction::BLOBHASH;
 			break;
 		}
 		case FunctionType::Kind::AddMod:
@@ -1015,7 +1074,7 @@ bool ExpressionCompiler::visit(FunctionCall const& _functionCall)
 		case FunctionType::Kind::RIPEMD160:
 		{
 			_functionCall.expression().accept(*this);
-			static map<FunctionType::Kind, u256> const contractAddresses{
+			static std::map<FunctionType::Kind, u256> const contractAddresses{
 				{FunctionType::Kind::ECRecover, 1},
 				{FunctionType::Kind::SHA256, 2},
 				{FunctionType::Kind::RIPEMD160, 3}
@@ -1029,7 +1088,7 @@ bool ExpressionCompiler::visit(FunctionCall const& _functionCall)
 		}
 		case FunctionType::Kind::ArrayPush:
 		{
-			solAssert(function.bound(), "");
+			solAssert(function.hasBoundFirstArgument(), "");
 			_functionCall.expression().accept(*this);
 
 			if (function.parameterTypes().size() == 0)
@@ -1095,7 +1154,7 @@ bool ExpressionCompiler::visit(FunctionCall const& _functionCall)
 		case FunctionType::Kind::ArrayPop:
 		{
 			_functionCall.expression().accept(*this);
-			solAssert(function.bound(), "");
+			solAssert(function.hasBoundFirstArgument(), "");
 			solAssert(function.parameterTypes().empty(), "");
 			ArrayType const* arrayType = dynamic_cast<ArrayType const*>(function.selfType());
 			solAssert(arrayType && arrayType->dataStoredIn(DataLocation::Storage), "");
@@ -1106,8 +1165,8 @@ bool ExpressionCompiler::visit(FunctionCall const& _functionCall)
 		case FunctionType::Kind::BytesConcat:
 		{
 			_functionCall.expression().accept(*this);
-			vector<Type const*> argumentTypes;
-			vector<Type const*> targetTypes;
+			std::vector<Type const*> argumentTypes;
+			std::vector<Type const*> targetTypes;
 			for (auto const& argument: arguments)
 			{
 				argument->accept(*this);
@@ -1201,9 +1260,8 @@ bool ExpressionCompiler::visit(FunctionCall const& _functionCall)
 		case FunctionType::Kind::Require:
 		{
 			acceptAndConvert(*arguments.front(), *function.parameterTypes().front(), false);
-
+			// stack: <condition>
 			bool haveReasonString = arguments.size() > 1 && m_context.revertStrings() != RevertStrings::Strip;
-
 			if (arguments.size() > 1)
 			{
 				// Users probably expect the second argument to be evaluated
@@ -1211,6 +1269,50 @@ bool ExpressionCompiler::visit(FunctionCall const& _functionCall)
 				// function call.
 				solAssert(arguments.size() == 2, "");
 				solAssert(function.kind() == FunctionType::Kind::Require, "");
+				auto const* magicType = dynamic_cast<MagicType const*>(arguments[1]->annotation().type);
+				if (magicType && magicType->kind() == MagicType::Kind::Error)
+				{
+					// Make sure that error constructor arguments are evaluated regardless of the require condition
+					auto const& errorConstructorCall = dynamic_cast<FunctionCall const&>(*arguments[1]);
+					errorConstructorCall.expression().accept(*this);
+					std::vector<Type const*> errorConstructorArgumentTypes{};
+					for (ASTPointer<Expression const> const& errorConstructorArgument: errorConstructorCall.sortedArguments())
+					{
+						errorConstructorArgument->accept(*this);
+						errorConstructorArgumentTypes.push_back(errorConstructorArgument->annotation().type);
+					}
+					unsigned const sizeOfConditionArgument = arguments.at(0)->annotation().type->sizeOnStack();
+					unsigned const sizeOfErrorArguments = CompilerUtils::sizeOnStack(errorConstructorArgumentTypes);
+					// stack: <condition> <arg0> <arg1> ... <argN>
+					try
+					{
+						// Move condition to the top of the stack
+						utils().moveToStackTop(sizeOfErrorArguments, sizeOfConditionArgument);
+					}
+					catch (StackTooDeepError const& _exception)
+					{
+						_exception << errinfo_sourceLocation(errorConstructorCall.location());
+						throw _exception;
+					}
+					// stack: <arg0> <arg1> ... <argN> <condition>
+					m_context << Instruction::ISZERO << Instruction::ISZERO;
+					AssemblyItem successBranchTag = m_context.appendConditionalJump();
+
+					auto const* errorDefinition = dynamic_cast<ErrorDefinition const*>(ASTNode::referencedDeclaration(errorConstructorCall.expression()));
+					solAssert(errorDefinition && errorDefinition->functionType(true));
+					utils().revertWithError(
+						errorDefinition->functionType(true)->externalSignature(),
+						errorDefinition->functionType(true)->parameterTypes(),
+						errorConstructorArgumentTypes
+					);
+					// Here, the argument is consumed, but in the other branch, it is still there.
+					m_context.adjustStackOffset(static_cast<int>(sizeOfErrorArguments));
+					m_context << successBranchTag;
+					// In case of the success branch i.e. require(true, ...), pop error constructor arguments
+					utils().popStackSlots(sizeOfErrorArguments);
+					break;
+				}
+
 				if (m_context.revertStrings() == RevertStrings::Strip)
 				{
 					if (!*arguments.at(1)->annotation().isPure)
@@ -1329,7 +1431,7 @@ bool ExpressionCompiler::visit(FunctionCall const& _functionCall)
 					// hash the signature
 					if (auto const* stringType = dynamic_cast<StringLiteralType const*>(selectorType))
 					{
-						m_context << util::selectorFromSignature(stringType->value());
+						m_context << util::selectorFromSignatureU256(stringType->value());
 						dataOnStack = TypeProvider::fixedBytes(4);
 					}
 					else
@@ -1371,7 +1473,7 @@ bool ExpressionCompiler::visit(FunctionCall const& _functionCall)
 				// stack: <memory pointer> <selector>
 
 				// load current memory, mask and combine the selector
-				string mask = formatNumber((u256(-1) >> 32));
+				std::string mask = formatNumber((u256(-1) >> 32));
 				m_context.appendInlineAssembly(R"({
 					let data_start := add(mem_ptr, 0x20)
 					let data := mload(data_start)
@@ -1431,7 +1533,7 @@ bool ExpressionCompiler::visit(FunctionCallOptions const& _functionCallOptions)
 	// Desired Stack: [salt], [gas], [value]
 	enum Option { Salt, Gas, Value };
 
-	vector<Option> presentOptions;
+	std::vector<Option> presentOptions;
 	FunctionType const& funType = dynamic_cast<FunctionType const&>(
 		*_functionCallOptions.expression().annotation().type
 	);
@@ -1441,7 +1543,7 @@ bool ExpressionCompiler::visit(FunctionCallOptions const& _functionCallOptions)
 
 	for (size_t i = 0; i < _functionCallOptions.options().size(); ++i)
 	{
-		string const& name = *_functionCallOptions.names()[i];
+		std::string const& name = *_functionCallOptions.names()[i];
 		Type const* requiredType = TypeProvider::uint256();
 		Option newOption;
 		if (name == "salt")
@@ -1476,17 +1578,21 @@ bool ExpressionCompiler::visit(NewExpression const&)
 bool ExpressionCompiler::visit(MemberAccess const& _memberAccess)
 {
 	CompilerContext::LocationSetter locationSetter(m_context, _memberAccess);
-	// Check whether the member is a bound function.
+	// Check whether the member is an attached function.
 	ASTString const& member = _memberAccess.memberName();
 	if (auto funType = dynamic_cast<FunctionType const*>(_memberAccess.annotation().type))
-		if (funType->bound())
+		if (funType->hasBoundFirstArgument())
 		{
 			acceptAndConvert(_memberAccess.expression(), *funType->selfType(), true);
 			if (funType->kind() == FunctionType::Kind::Internal)
 			{
 				FunctionDefinition const& funDef = dynamic_cast<decltype(funDef)>(funType->declaration());
 				solAssert(*_memberAccess.annotation().requiredLookup == VirtualLookup::Static, "");
-				utils().pushCombinedFunctionEntryLabel(funDef);
+				utils().pushCombinedFunctionEntryLabel(
+					funDef,
+					// If we call directly, do not include the second label.
+					!_memberAccess.annotation().calledDirectly
+				);
 				utils().moveIntoStack(funType->selfType()->sizeOnStack(), 1);
 			}
 			else if (
@@ -1519,10 +1625,14 @@ bool ExpressionCompiler::visit(MemberAccess const& _memberAccess)
 				_memberAccess.expression().accept(*this);
 				solAssert(_memberAccess.annotation().referencedDeclaration, "Referenced declaration not resolved.");
 				solAssert(*_memberAccess.annotation().requiredLookup == VirtualLookup::Super, "");
-				utils().pushCombinedFunctionEntryLabel(m_context.superFunction(
-					dynamic_cast<FunctionDefinition const&>(*_memberAccess.annotation().referencedDeclaration),
-					contractType->contractDefinition()
-				));
+				utils().pushCombinedFunctionEntryLabel(
+					m_context.superFunction(
+						dynamic_cast<FunctionDefinition const&>(*_memberAccess.annotation().referencedDeclaration),
+						contractType->contractDefinition()
+					),
+					// If we call directly, do not include the second label.
+					!_memberAccess.annotation().calledDirectly
+				);
 			}
 			else
 			{
@@ -1541,7 +1651,11 @@ bool ExpressionCompiler::visit(MemberAccess const& _memberAccess)
 						if (auto const* function = dynamic_cast<FunctionDefinition const*>(_memberAccess.annotation().referencedDeclaration))
 						{
 							solAssert(*_memberAccess.annotation().requiredLookup == VirtualLookup::Static, "");
-							utils().pushCombinedFunctionEntryLabel(*function);
+							utils().pushCombinedFunctionEntryLabel(
+								*function,
+								// If we call directly, do not include the second label.
+								!_memberAccess.annotation().calledDirectly
+							);
 						}
 						else
 							solAssert(false, "Function not found in member access");
@@ -1602,6 +1716,10 @@ bool ExpressionCompiler::visit(MemberAccess const& _memberAccess)
 	{
 		if (functionType->hasDeclaration())
 		{
+			// Still visit the expression in case it has side effects.
+			_memberAccess.expression().accept(*this);
+			utils().popStackElement(*functionType);
+
 			if (functionType->kind() == FunctionType::Kind::Event)
 				m_context << u256(h256::Arith(util::keccak256(functionType->externalSignature())));
 			else
@@ -1757,7 +1875,7 @@ bool ExpressionCompiler::visit(MemberAccess const& _memberAccess)
 			);
 			m_context << Instruction::EXTCODEHASH;
 		}
-		else if ((set<string>{"send", "transfer"}).count(member))
+		else if ((std::set<std::string>{"send", "transfer"}).count(member))
 		{
 			solAssert(dynamic_cast<AddressType const&>(*_memberAccess.expression().annotation().type).stateMutability() == StateMutability::Payable, "");
 			utils().convertType(
@@ -1766,7 +1884,7 @@ bool ExpressionCompiler::visit(MemberAccess const& _memberAccess)
 				true
 			);
 		}
-		else if ((set<string>{"call", "callcode", "delegatecall", "staticcall"}).count(member))
+		else if ((std::set<std::string>{"call", "callcode", "delegatecall", "staticcall"}).count(member))
 			utils().convertType(
 				*_memberAccess.expression().annotation().type,
 				*TypeProvider::address(),
@@ -1808,8 +1926,8 @@ bool ExpressionCompiler::visit(MemberAccess const& _memberAccess)
 			m_context << Instruction::COINBASE;
 		else if (member == "timestamp")
 			m_context << Instruction::TIMESTAMP;
-		else if (member == "difficulty")
-			m_context << Instruction::DIFFICULTY;
+		else if (member == "difficulty" || member == "prevrandao")
+			m_context << Instruction::PREVRANDAO;
 		else if (member == "number")
 			m_context << Instruction::NUMBER;
 		else if (member == "gaslimit")
@@ -1826,6 +1944,8 @@ bool ExpressionCompiler::visit(MemberAccess const& _memberAccess)
 			m_context << Instruction::CHAINID;
 		else if (member == "basefee")
 			m_context << Instruction::BASEFEE;
+		else if (member == "blobbasefee")
+			m_context << Instruction::BLOBBASEFEE;
 		else if (member == "data")
 			m_context << u256(0) << Instruction::CALLDATASIZE;
 		else if (member == "sig")
@@ -1849,7 +1969,7 @@ bool ExpressionCompiler::visit(MemberAccess const& _memberAccess)
 				Whiskers(R"({
 					mstore(start, sub(end, add(start, 0x20)))
 					mstore(<free>, and(add(end, 31), not(31)))
-				})")("free", to_string(CompilerUtils::freeMemoryPointer)).render(),
+				})")("free", std::to_string(CompilerUtils::freeMemoryPointer)).render(),
 				{"start", "end"}
 			);
 			m_context << Instruction::POP;
@@ -1885,7 +2005,7 @@ bool ExpressionCompiler::visit(MemberAccess const& _memberAccess)
 				solAssert(false, "min/max not available for the given type.");
 
 		}
-		else if ((set<string>{"encode", "encodePacked", "encodeWithSelector", "encodeWithSignature", "decode"}).count(member))
+		else if ((std::set<std::string>{"encode", "encodePacked", "encodeWithSelector", "encodeWithSignature", "decode"}).count(member))
 		{
 			// no-op
 		}
@@ -1900,7 +2020,7 @@ bool ExpressionCompiler::visit(MemberAccess const& _memberAccess)
 		{
 		case DataLocation::Storage:
 		{
-			pair<u256, unsigned> const& offsets = type.storageOffsetsOfMember(member);
+			std::pair<u256, unsigned> const& offsets = type.storageOffsetsOfMember(member);
 			m_context << offsets.first << Instruction::ADD << u256(offsets.second);
 			setLValueToStorageItem(_memberAccess);
 			break;
@@ -1975,6 +2095,9 @@ bool ExpressionCompiler::visit(MemberAccess const& _memberAccess)
 					ArrayUtils(m_context).retrieveLength(type);
 					m_context << Instruction::SWAP1 << Instruction::POP;
 					break;
+				case DataLocation::Transient:
+					solUnimplemented("Transient data location is only supported for value types.");
+					break;
 				case DataLocation::Memory:
 					m_context << Instruction::MLOAD;
 					break;
@@ -2025,7 +2148,11 @@ bool ExpressionCompiler::visit(MemberAccess const& _memberAccess)
 			solAssert(function && function->isFree(), "");
 			solAssert(funType->kind() == FunctionType::Kind::Internal, "");
 			solAssert(*_memberAccess.annotation().requiredLookup == VirtualLookup::Static, "");
-			utils().pushCombinedFunctionEntryLabel(*function);
+			utils().pushCombinedFunctionEntryLabel(
+				*function,
+				// If we call directly, do not include the second label.
+				!_memberAccess.annotation().calledDirectly
+			);
 		}
 		else if (auto const* contract = dynamic_cast<ContractDefinition const*>(_memberAccess.annotation().referencedDeclaration))
 		{
@@ -2116,6 +2243,9 @@ bool ExpressionCompiler::visit(IndexAccess const& _indexAccess)
 					}
 					else
 						setLValueToStorageItem(_indexAccess);
+					break;
+				case DataLocation::Transient:
+					solUnimplemented("Transient data location is only supported for value types.");
 					break;
 				case DataLocation::Memory:
 					ArrayUtils(m_context).accessIndex(arrayType);
@@ -2223,12 +2353,14 @@ void ExpressionCompiler::endVisit(Identifier const& _identifier)
 	}
 	else if (FunctionDefinition const* functionDef = dynamic_cast<FunctionDefinition const*>(declaration))
 	{
-		// If the identifier is called right away, this code is executed in visit(FunctionCall...), because
-		// we want to avoid having a reference to the runtime function entry point in the
-		// constructor context, since this would force the compiler to include unreferenced
-		// internal functions in the runtime context.
 		solAssert(*_identifier.annotation().requiredLookup == VirtualLookup::Virtual, "");
-		utils().pushCombinedFunctionEntryLabel(functionDef->resolveVirtual(m_context.mostDerivedContract()));
+		utils().pushCombinedFunctionEntryLabel(
+			functionDef->resolveVirtual(m_context.mostDerivedContract()),
+			// If we call directly, do not include the second (potential runtime) label.
+			// Including the label might lead to the runtime code being included in the creation
+			// code even though it is never executed.
+			!_identifier.annotation().calledDirectly
+		);
 	}
 	else if (auto variable = dynamic_cast<VariableDeclaration const*>(declaration))
 		appendVariable(*variable, static_cast<Expression const&>(_identifier));
@@ -2387,7 +2519,7 @@ void ExpressionCompiler::appendArithmeticOperatorCode(Token _operator, Type cons
 	IntegerType const& type = dynamic_cast<IntegerType const&>(_type);
 	if (m_context.arithmetic() == Arithmetic::Checked)
 	{
-		string functionName;
+		std::string functionName;
 		switch (_operator)
 		{
 		case Token::Add:
@@ -2553,7 +2685,7 @@ void ExpressionCompiler::appendExpOperatorCode(Type const& _valueType, Type cons
 
 void ExpressionCompiler::appendExternalFunctionCall(
 	FunctionType const& _functionType,
-	vector<ASTPointer<Expression const>> const& _arguments,
+	std::vector<ASTPointer<Expression const>> const& _arguments,
 	bool _tryCall
 )
 {
@@ -2570,14 +2702,14 @@ void ExpressionCompiler::appendExternalFunctionCall(
 	// function identifier [unless bare]
 	// contract address
 
-	unsigned selfSize = _functionType.bound() ? _functionType.selfType()->sizeOnStack() : 0;
+	unsigned selfSize = _functionType.hasBoundFirstArgument() ? _functionType.selfType()->sizeOnStack() : 0;
 	unsigned gasValueSize = (_functionType.gasSet() ? 1u : 0u) + (_functionType.valueSet() ? 1u : 0u);
 	unsigned contractStackPos = m_context.currentToBaseStackOffset(1 + gasValueSize + selfSize + (_functionType.isBareCall() ? 0 : 1));
 	unsigned gasStackPos = m_context.currentToBaseStackOffset(gasValueSize);
 	unsigned valueStackPos = m_context.currentToBaseStackOffset(1);
 
 	// move self object to top
-	if (_functionType.bound())
+	if (_functionType.hasBoundFirstArgument())
 		utils().moveToStackTop(gasValueSize, _functionType.selfType()->sizeOnStack());
 
 	auto funKind = _functionType.kind();
@@ -2605,7 +2737,7 @@ void ExpressionCompiler::appendExternalFunctionCall(
 	// Evaluate arguments.
 	TypePointers argumentTypes;
 	TypePointers parameterTypes = _functionType.parameterTypes();
-	if (_functionType.bound())
+	if (_functionType.hasBoundFirstArgument())
 	{
 		argumentTypes.push_back(_functionType.selfType());
 		parameterTypes.insert(parameterTypes.begin(), _functionType.selfType());
@@ -2872,11 +3004,14 @@ void ExpressionCompiler::setLValueFromDeclaration(Declaration const& _declaratio
 	if (m_context.isLocalVariable(&_declaration))
 		setLValue<StackVariable>(_expression, dynamic_cast<VariableDeclaration const&>(_declaration));
 	else if (m_context.isStateVariable(&_declaration))
-		setLValue<StorageItem>(_expression, dynamic_cast<VariableDeclaration const&>(_declaration));
+	{
+		if (dynamic_cast<VariableDeclaration const&>(_declaration).referenceLocation() == VariableDeclaration::Location::Transient)
+			setLValue<TransientStorageItem>(_expression, dynamic_cast<VariableDeclaration const&>(_declaration));
+		else
+			setLValue<StorageItem>(_expression, dynamic_cast<VariableDeclaration const&>(_declaration));
+	}
 	else
-		BOOST_THROW_EXCEPTION(InternalCompilerError()
-			<< errinfo_sourceLocation(_expression.location())
-			<< util::errinfo_comment("Identifier type not supported or identifier not found."));
+		solAssert(false, "Identifier type not supported or identifier not found.");
 }
 
 void ExpressionCompiler::setLValueToStorageItem(Expression const& _expression)

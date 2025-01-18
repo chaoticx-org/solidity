@@ -56,7 +56,8 @@ enum class InputMode
 	StandardJson,
 	Linker,
 	Assembler,
-	LanguageServer
+	LanguageServer,
+	EVMAssemblerJSON
 };
 
 struct CompilerOutputs
@@ -77,14 +78,16 @@ struct CompilerOutputs
 			{"bin-runtime", &CompilerOutputs::binaryRuntime},
 			{"abi", &CompilerOutputs::abi},
 			{"ir", &CompilerOutputs::ir},
+			{"ir-ast-json", &CompilerOutputs::irAstJson},
 			{"ir-optimized", &CompilerOutputs::irOptimized},
-			{"ewasm", &CompilerOutputs::ewasm},
-			{"ewasm-ir", &CompilerOutputs::ewasmIR},
+			{"ir-optimized-ast-json", &CompilerOutputs::irOptimizedAstJson},
 			{"hashes", &CompilerOutputs::signatureHashes},
 			{"userdoc", &CompilerOutputs::natspecUser},
 			{"devdoc", &CompilerOutputs::natspecDev},
 			{"metadata", &CompilerOutputs::metadata},
 			{"storage-layout", &CompilerOutputs::storageLayout},
+			{"transient-storage-layout", &CompilerOutputs::transientStorageLayout},
+			{"yul-cfg-json", &CompilerOutputs::yulCFGJson},
 		};
 		return components;
 	}
@@ -97,14 +100,16 @@ struct CompilerOutputs
 	bool binaryRuntime = false;
 	bool abi = false;
 	bool ir = false;
+	bool irAstJson = false;
+	bool yulCFGJson = false;
 	bool irOptimized = false;
-	bool ewasm = false;
-	bool ewasmIR = false;
+	bool irOptimizedAstJson = false;
 	bool signatureHashes = false;
 	bool natspecUser = false;
 	bool natspecDev = false;
 	bool metadata = false;
 	bool storageLayout = false;
+	bool transientStorageLayout = false;
 };
 
 struct CombinedJsonRequests
@@ -124,6 +129,7 @@ struct CombinedJsonRequests
 			{"opcodes", &CombinedJsonRequests::opcodes},
 			{"asm", &CombinedJsonRequests::asm_},
 			{"storage-layout", &CombinedJsonRequests::storageLayout},
+			{"transient-storage-layout", &CombinedJsonRequests::transientStorageLayout},
 			{"generated-sources", &CombinedJsonRequests::generatedSources},
 			{"generated-sources-runtime", &CombinedJsonRequests::generatedSourcesRuntime},
 			{"srcmap", &CombinedJsonRequests::srcMap},
@@ -145,6 +151,7 @@ struct CombinedJsonRequests
 	bool opcodes = false;
 	bool asm_ = false;
 	bool storageLayout = false;
+	bool transientStorageLayout = false;
 	bool generatedSources = false;
 	bool generatedSourcesRuntime = false;
 	bool srcMap = false;
@@ -174,7 +181,7 @@ struct CommandLineOptions
 		std::vector<boost::filesystem::path> includePaths;
 		FileReader::FileSystemPathSet allowedDirectories;
 		bool ignoreMissingFiles = false;
-		bool errorRecovery = false;
+		bool noImportCallback = false;
 	} input;
 
 	struct
@@ -186,6 +193,7 @@ struct CommandLineOptions
 		RevertStrings revertStrings = RevertStrings::Default;
 		std::optional<langutil::DebugInfoSelection> debugInfoSelection;
 		CompilerStack::State stopAfter = CompilerStack::State::CompilationSuccessful;
+		std::optional<uint8_t> eofVersion;
 	} output;
 
 	struct
@@ -215,15 +223,16 @@ struct CommandLineOptions
 
 	struct
 	{
+		CompilerStack::MetadataFormat format = CompilerStack::defaultMetadataFormat();
 		CompilerStack::MetadataHash hash = CompilerStack::MetadataHash::IPFS;
 		bool literalSources = false;
 	} metadata;
 
 	struct
 	{
-		bool enabled = false;
+		bool optimizeEvmasm = false;
+		bool optimizeYul = false;
 		std::optional<unsigned> expectedExecutionsPerDeployment;
-		bool noOptimizeYul = false;
 		std::optional<std::string> yulSteps;
 	} optimizer;
 
@@ -246,12 +255,12 @@ public:
 
 	CommandLineOptions const& options() const { return m_options; }
 
-	static void printHelp(std::ostream& _out) { _out << optionsDescription(); }
+	static void printHelp(std::ostream& _out) { _out << optionsDescription(true /* _forHelp */); }
 
 private:
 	/// @returns a specification of all named command-line options accepted by the compiler.
 	/// The object can be used to parse command-line arguments or to generate the help screen.
-	static boost::program_options::options_description optionsDescription();
+	static boost::program_options::options_description optionsDescription(bool _forHelp = false);
 
 	/// @returns a specification of all positional command-line arguments accepted by the compiler.
 	/// The object can be used to parse command-line arguments or to generate the help screen.
@@ -293,4 +302,4 @@ private:
 	boost::program_options::variables_map m_args;
 };
 
-}
+} // namespace solidity::frontend

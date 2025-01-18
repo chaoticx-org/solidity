@@ -2,8 +2,7 @@
   "absolutePath": "a",
   "id": 7,
   "nodeType": "SourceUnit",
-  "nodes":
-  [
+  "nodes": [
     {
       "abstract": false,
       "baseContracts": [],
@@ -13,87 +12,85 @@
       "name": "C",
       "nameLocation": "9:1:1",
       "nodeType": "ContractDefinition",
-      "nodes":
-      [
+      "nodes": [
         {
-          "body":
-          {
+          "body": {
             "id": 4,
             "nodeType": "Block",
             "src": "42:68:1",
-            "statements":
-            [
+            "statements": [
               {
-                "AST":
-                {
+                "AST": {
+                  "nativeSrc": "61:43:1",
                   "nodeType": "YulBlock",
                   "src": "61:43:1",
-                  "statements":
-                  [
+                  "statements": [
                     {
-                      "body":
-                      {
+                      "body": {
+                        "nativeSrc": "76:22:1",
                         "nodeType": "YulBlock",
                         "src": "76:22:1",
-                        "statements":
-                        [
+                        "statements": [
                           {
-                            "expression":
-                            {
-                              "arguments":
-                              [
+                            "expression": {
+                              "arguments": [
                                 {
-                                  "arguments":
-                                  [
+                                  "arguments": [
                                     {
                                       "kind": "number",
+                                      "nativeSrc": "92:2:1",
                                       "nodeType": "YulLiteral",
                                       "src": "92:2:1",
                                       "type": "",
                                       "value": "20"
                                     }
                                   ],
-                                  "functionName":
-                                  {
+                                  "functionName": {
                                     "name": "blockhash",
+                                    "nativeSrc": "82:9:1",
                                     "nodeType": "YulIdentifier",
                                     "src": "82:9:1"
                                   },
+                                  "nativeSrc": "82:13:1",
                                   "nodeType": "YulFunctionCall",
                                   "src": "82:13:1"
                                 }
                               ],
-                              "functionName":
-                              {
+                              "functionName": {
                                 "name": "pop",
+                                "nativeSrc": "78:3:1",
                                 "nodeType": "YulIdentifier",
                                 "src": "78:3:1"
                               },
+                              "nativeSrc": "78:18:1",
                               "nodeType": "YulFunctionCall",
                               "src": "78:18:1"
                             },
+                            "nativeSrc": "78:18:1",
                             "nodeType": "YulExpressionStatement",
                             "src": "78:18:1"
                           }
                         ]
                       },
                       "name": "g",
+                      "nativeSrc": "63:35:1",
                       "nodeType": "YulFunctionDefinition",
                       "src": "63:35:1"
                     },
                     {
-                      "expression":
-                      {
+                      "expression": {
                         "arguments": [],
-                        "functionName":
-                        {
+                        "functionName": {
                           "name": "g",
+                          "nativeSrc": "99:1:1",
                           "nodeType": "YulIdentifier",
                           "src": "99:1:1"
                         },
+                        "nativeSrc": "99:3:1",
                         "nodeType": "YulFunctionCall",
                         "src": "99:3:1"
                       },
+                      "nativeSrc": "99:3:1",
                       "nodeType": "YulExpressionStatement",
                       "src": "99:3:1"
                     }
@@ -114,15 +111,13 @@
           "name": "h",
           "nameLocation": "26:1:1",
           "nodeType": "FunctionDefinition",
-          "parameters":
-          {
+          "parameters": {
             "id": 1,
             "nodeType": "ParameterList",
             "parameters": [],
             "src": "27:2:1"
           },
-          "returnParameters":
-          {
+          "returnParameters": {
             "id": 2,
             "nodeType": "ParameterList",
             "parameters": [],
@@ -135,7 +130,8 @@
         }
       ],
       "src": "0:112:1",
-      "usedErrors": []
+      "usedErrors": [],
+      "usedEvents": []
     }
   ],
   "src": "0:113:1"

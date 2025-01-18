@@ -15,7 +15,9 @@ contract C {
 	}
 }
 // ====
-// SMTEngine: all
+// SMTEngine: chc
+// SMTTargets: assert
+// SMTIgnoreCex: yes
+// SMTIgnoreOS: linux
 // ----
-// Warning 6328: (167-181): CHC: Assertion violation happens here.
-// Info 1180: Reentrancy property(ies) for :C:\n!(<errorCode> = 1)\n<errorCode> = 0 -> no errors\n<errorCode> = 1 -> Overflow at ++x\n<errorCode> = 3 -> Assertion failed at assert(x < 10)\n
+// Warning 6328: (167-181): CHC: Assertion violation happens here.\nCounterexample:\nx = 10, d = 0\n\nTransaction trace:\nC.constructor()\nState: x = 0, d = 0\nC.f()\nState: x = 1, d = 0\nC.f()\nState: x = 2, d = 0\nC.f()\nState: x = 3, d = 0\nC.f()\nState: x = 4, d = 0\nC.f()\nState: x = 5, d = 0\nC.f()\nState: x = 6, d = 0\nC.g()\n    d.d() -- untrusted external call, synthesized as:\n        C.f() -- reentrant call\n        C.f() -- reentrant call\nState: x = 8, d = 0\nC.g()\n    d.d() -- untrusted external call, synthesized as:\n        C.f() -- reentrant call\n        C.f() -- reentrant call

@@ -17,9 +17,10 @@ contract A {
 		return d.getX();
 	}
 }
-
 // ----
 // g(int256): -1 -> -1
-// gas legacy: 103494
+// gas legacy: 77876
+// gas legacy code: 24200
 // g(int256): 10 -> 10
-// gas legacy: 103122
+// gas legacy: 77504
+// gas legacy code: 24200

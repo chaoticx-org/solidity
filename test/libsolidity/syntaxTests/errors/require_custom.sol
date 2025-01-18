@@ -5,4 +5,3 @@ contract C {
     }
 }
 // ----
-// TypeError 9322: (83-90): No matching declaration found after argument-dependent lookup.

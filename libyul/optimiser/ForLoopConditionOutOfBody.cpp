@@ -23,7 +23,6 @@
 
 #include <libsolutil/CommonData.h>
 
-using namespace std;
 using namespace solidity;
 using namespace solidity::yul;
 
@@ -37,35 +36,38 @@ void ForLoopConditionOutOfBody::operator()(ForLoop& _forLoop)
 	ASTModifier::operator()(_forLoop);
 
 	if (
-		!m_dialect.booleanNegationFunction() ||
-		!holds_alternative<Literal>(*_forLoop.condition) ||
-		valueOfLiteral(std::get<Literal>(*_forLoop.condition)) == u256(0) ||
+		!m_dialect.booleanNegationFunctionHandle() ||
+		!std::holds_alternative<Literal>(*_forLoop.condition) ||
+		std::get<Literal>(*_forLoop.condition).value.value() == 0 ||
 		_forLoop.body.statements.empty() ||
-		!holds_alternative<If>(_forLoop.body.statements.front())
+		!std::holds_alternative<If>(_forLoop.body.statements.front())
 	)
 		return;
 
 	If& firstStatement = std::get<If>(_forLoop.body.statements.front());
 	if (
 		firstStatement.body.statements.empty() ||
-		!holds_alternative<Break>(firstStatement.body.statements.front())
+		!std::holds_alternative<Break>(firstStatement.body.statements.front())
 	)
 		return;
 	if (!SideEffectsCollector(m_dialect, *firstStatement.condition).movable())
 		return;
 
-	YulString iszero = m_dialect.booleanNegationFunction()->name;
-	shared_ptr<DebugData const> debugData = debugDataOf(*firstStatement.condition);
+	std::optional<BuiltinHandle> iszero = m_dialect.booleanNegationFunctionHandle();
+	yulAssert(iszero.has_value());
+	auto const& isZeroHandle = *iszero;
+	langutil::DebugData::ConstPtr debugData = debugDataOf(*firstStatement.condition);
 
 	if (
-		holds_alternative<FunctionCall>(*firstStatement.condition) &&
-		std::get<FunctionCall>(*firstStatement.condition).functionName.name == iszero
+		std::holds_alternative<FunctionCall>(*firstStatement.condition) &&
+		std::holds_alternative<BuiltinName>(std::get<FunctionCall>(*firstStatement.condition).functionName) &&
+		std::get<BuiltinName>(std::get<FunctionCall>(*firstStatement.condition).functionName).handle == isZeroHandle
 	)
-		_forLoop.condition = make_unique<Expression>(std::move(std::get<FunctionCall>(*firstStatement.condition).arguments.front()));
+		_forLoop.condition = std::make_unique<Expression>(std::move(std::get<FunctionCall>(*firstStatement.condition).arguments.front()));
 	else
-		_forLoop.condition = make_unique<Expression>(FunctionCall{
+		_forLoop.condition = std::make_unique<Expression>(FunctionCall{
 			debugData,
-			Identifier{debugData, iszero},
+			BuiltinName{debugData, isZeroHandle},
 			util::make_vector<Expression>(
 				std::move(*firstStatement.condition)
 			)

@@ -19,11 +19,15 @@ add_executable(isoltest
 	../TestCase.cpp
 	../TestCaseReader.cpp
 	../libsolidity/util/BytesUtils.cpp
+	../libsolidity/util/Common.cpp
 	../libsolidity/util/ContractABIUtils.cpp
 	../libsolidity/util/TestFileParser.cpp
 	../libsolidity/util/TestFunctionCall.cpp
 	../libsolidity/GasTest.cpp
 	../libsolidity/MemoryGuardTest.cpp
+	../libsolidity/NatspecJSONTest.cpp
+	../libsolidity/OptimizedIRCachingTest.cpp
+	../libsolidity/OptimizedIRCachingTest.h
 	../libsolidity/SyntaxTest.cpp
 	../libsolidity/SemanticTest.cpp
 	../libsolidity/AnalysisFramework.cpp
@@ -31,15 +35,18 @@ add_executable(isoltest
 	../ExecutionFramework.cpp
 	../libsolidity/ABIJsonTest.cpp
 	../libsolidity/ASTJSONTest.cpp
+	../libsolidity/ASTPropertyTest.cpp
+	../libsolidity/FunctionDependencyGraphTest.cpp
 	../libsolidity/SMTCheckerTest.cpp
 	../libyul/Common.cpp
 	../libyul/ControlFlowGraphTest.cpp
+	../libyul/SSAControlFlowGraphTest.cpp
 	../libyul/ControlFlowSideEffectsTest.cpp
 	../libyul/EVMCodeTransformTest.cpp
-	../libyul/EwasmTranslationTest.cpp
 	../libyul/FunctionSideEffects.cpp
 	../libyul/ObjectCompilerTest.cpp
 	../libyul/SyntaxTest.cpp
+	../libyul/StackShufflingTest.cpp
 	../libyul/StackLayoutGeneratorTest.cpp
 	../libyul/YulOptimizerTest.cpp
 	../libyul/YulOptimizerTestCommon.cpp

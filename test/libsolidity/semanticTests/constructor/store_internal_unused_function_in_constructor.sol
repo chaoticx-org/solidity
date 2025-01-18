@@ -13,8 +13,7 @@ contract C {
         return x();
     }
 }
-
 // ====
-// compileToEwasm: also
+// bytecodeFormat: legacy,>=EOFv1
 // ----
 // t() -> 7

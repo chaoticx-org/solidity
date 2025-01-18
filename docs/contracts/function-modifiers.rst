@@ -6,7 +6,7 @@
 Function Modifiers
 ******************
 
-Modifiers can be used to change the behaviour of functions in a declarative way.
+Modifiers can be used to change the behavior of functions in a declarative way.
 For example,
 you can use a modifier to automatically check a condition prior to executing the function.
 
@@ -40,16 +40,6 @@ if they are marked ``virtual``. For details, please see
         }
     }
 
-    contract destructible is owned {
-        // This contract inherits the `onlyOwner` modifier from
-        // `owned` and applies it to the `destroy` function, which
-        // causes that calls to `destroy` only have an effect if
-        // they are made by the stored owner.
-        function destroy() public onlyOwner {
-            selfdestruct(owner);
-        }
-    }
-
     contract priced {
         // Modifiers can receive arguments:
         modifier costs(uint price) {
@@ -59,8 +49,8 @@ if they are marked ``virtual``. For details, please see
         }
     }
 
-    contract Register is priced, destructible {
-        mapping (address => bool) registeredAddresses;
+    contract Register is priced, owned {
+        mapping(address => bool) registeredAddresses;
         uint price;
 
         constructor(uint initialPrice) { price = initialPrice; }
@@ -72,6 +62,9 @@ if they are marked ``virtual``. For details, please see
             registeredAddresses[msg.sender] = true;
         }
 
+        // This contract inherits the `onlyOwner` modifier from
+        // the `owned` contract. As a result, calls to `changePrice` will
+        // only take effect if they are made by the stored owner.
         function changePrice(uint price_) public onlyOwner {
             price = price_;
         }
@@ -111,6 +104,12 @@ whitespace-separated list and are evaluated in the order presented.
 Modifiers cannot implicitly access or change the arguments and return values of functions they modify.
 Their values can only be passed to them explicitly at the point of invocation.
 
+In function modifiers, it is necessary to specify when you want the function to which the modifier is
+applied to be run. The placeholder statement (denoted by a single underscore character ``_``) is used to
+denote where the body of the function being modified should be inserted. Note that the
+placeholder operator is different from using underscores as leading or trailing characters in variable
+names, which is a stylistic choice.
+
 Explicit returns from a modifier or function body only leave the current
 modifier or function body. Return variables are assigned and
 control flow continues after the ``_`` in the preceding modifier.
@@ -125,7 +124,7 @@ variables are set to their :ref:`default values<default-value>` just as if the f
 body.
 
 The ``_`` symbol can appear in the modifier multiple times. Each occurrence is replaced with
-the function body.
+the function body, and the function returns the return value of the final occurrence.
 
 Arbitrary expressions are allowed for modifier arguments and in this context,
 all symbols visible from the function are visible in the modifier. Symbols

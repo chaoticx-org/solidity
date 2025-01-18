@@ -21,11 +21,15 @@
 
 #include <libyul/Utilities.h>
 
+#include <libyul/backends/evm/EVMDialect.h>
+
 #include <libyul/AST.h>
+#include <libyul/Dialect.h>
 #include <libyul/Exceptions.h>
 
 #include <libsolutil/CommonData.h>
 #include <libsolutil/FixedHash.h>
+#include <libsolutil/Visitor.h>
 
 #include <boost/algorithm/string.hpp>
 
@@ -33,16 +37,15 @@
 #include <sstream>
 #include <vector>
 
-using namespace std;
 using namespace solidity;
 using namespace solidity::yul;
 using namespace solidity::util;
 
-string solidity::yul::reindent(string const& _code)
+std::string solidity::yul::reindent(std::string const& _code)
 {
 	int constexpr indentationWidth = 4;
 
-	auto constexpr static countBraces = [](string const& _s) noexcept -> int
+	auto constexpr static countBraces = [](std::string const& _s) noexcept -> int
 	{
 		auto const i = _s.find("//");
 		auto const e = i == _s.npos ? end(_s) : next(begin(_s), static_cast<ptrdiff_t>(i));
@@ -51,22 +54,22 @@ string solidity::yul::reindent(string const& _code)
 		return int(opening - closing);
 	};
 
-	vector<string> lines;
+	std::vector<std::string> lines;
 	boost::split(lines, _code, boost::is_any_of("\n"));
-	for (string& line: lines)
+	for (std::string& line: lines)
 		boost::trim(line);
 
 	// Reduce multiple consecutive empty lines.
-	lines = fold(lines, vector<string>{}, [](auto&& _lines, auto&& _line) {
+	lines = fold(lines, std::vector<std::string>{}, [](auto&& _lines, auto&& _line) {
 		if (!(_line.empty() && !_lines.empty() && _lines.back().empty()))
 			_lines.emplace_back(std::move(_line));
 		return std::move(_lines);
 	});
 
-	stringstream out;
+	std::stringstream out;
 	int depth = 0;
 
-	for (string const& line: lines)
+	for (std::string const& line: lines)
 	{
 		int const diff = countBraces(line);
 		if (diff < 0)
@@ -87,60 +90,150 @@ string solidity::yul::reindent(string const& _code)
 	return out.str();
 }
 
-u256 solidity::yul::valueOfNumberLiteral(Literal const& _literal)
+LiteralValue solidity::yul::valueOfNumberLiteral(std::string_view const _literal)
 {
-	yulAssert(_literal.kind == LiteralKind::Number, "Expected number literal!");
-
-	std::string const& literalString = _literal.value.str();
-	yulAssert(isValidDecimal(literalString) || isValidHex(literalString), "Invalid number literal!");
-	return u256(literalString);
+	return LiteralValue{LiteralValue::Data(_literal), std::string(_literal)};
 }
 
-u256 solidity::yul::valueOfStringLiteral(Literal const& _literal)
+LiteralValue solidity::yul::valueOfStringLiteral(std::string_view const _literal)
 {
-	yulAssert(_literal.kind == LiteralKind::String, "Expected string literal!");
-	yulAssert(_literal.value.str().size() <= 32, "Literal string too long!");
-
-	return u256(h256(_literal.value.str(), h256::FromBinary, h256::AlignLeft));
+	std::string const s(_literal);
+	return LiteralValue{u256(h256(s, h256::FromBinary, h256::AlignLeft)), s};
 }
 
-u256 yul::valueOfBoolLiteral(Literal const& _literal)
+LiteralValue solidity::yul::valueOfBuiltinStringLiteralArgument(std::string_view _literal)
 {
-	yulAssert(_literal.kind == LiteralKind::Boolean, "Expected bool literal!");
+	return LiteralValue{std::string(_literal)};
+}
 
-	if (_literal.value == "true"_yulstring)
-		return u256(1);
-	else if (_literal.value == "false"_yulstring)
-		return u256(0);
+LiteralValue solidity::yul::valueOfBoolLiteral(std::string_view const _literal)
+{
+	if (_literal == "true")
+		return LiteralValue{true};
+	else if (_literal == "false")
+		return LiteralValue{false};
 
 	yulAssert(false, "Unexpected bool literal value!");
 }
 
-u256 solidity::yul::valueOfLiteral(Literal const& _literal)
+LiteralValue solidity::yul::valueOfLiteral(std::string_view const _literal, LiteralKind const& _kind, bool const _unlimitedLiteralArgument)
+{
+	switch (_kind)
+	{
+	case LiteralKind::Number:
+		return valueOfNumberLiteral(_literal);
+	case LiteralKind::Boolean:
+		return valueOfBoolLiteral(_literal);
+	case LiteralKind::String:
+		return _unlimitedLiteralArgument ? valueOfBuiltinStringLiteralArgument(_literal) : valueOfStringLiteral(_literal);
+	}
+	util::unreachable();
+}
+
+std::string solidity::yul::formatLiteral(solidity::yul::Literal const& _literal, bool const _validated)
+{
+	if (_validated)
+		yulAssert(validLiteral(_literal), "Encountered invalid literal in formatLiteral.");
+
+	if (_literal.value.unlimited())
+		return _literal.value.builtinStringLiteralValue();
+
+	if (_literal.value.hint())
+		return *_literal.value.hint();
+
+	if (_literal.kind == LiteralKind::Boolean)
+		return _literal.value.value() == false ? "false" : "true";
+
+	// if there is no hint and it is not a boolean, just stringify the u256 word
+	return _literal.value.value().str();
+}
+
+bool solidity::yul::validLiteral(solidity::yul::Literal const& _literal)
 {
 	switch (_literal.kind)
 	{
-		case LiteralKind::Number:
-			return valueOfNumberLiteral(_literal);
-		case LiteralKind::Boolean:
-			return valueOfBoolLiteral(_literal);
-		case LiteralKind::String:
-			return valueOfStringLiteral(_literal);
-		default:
-			yulAssert(false, "Unexpected literal kind!");
+	case LiteralKind::Number:
+		return validNumberLiteral(_literal);
+	case LiteralKind::Boolean:
+		return validBoolLiteral(_literal);
+	case LiteralKind::String:
+		return validStringLiteral(_literal);
 	}
+	util::unreachable();
+}
+
+bool solidity::yul::validStringLiteral(solidity::yul::Literal const& _literal)
+{
+	if (_literal.kind != LiteralKind::String)
+		return false;
+
+	if (_literal.value.unlimited())
+		return true;
+
+	if (_literal.value.hint())
+		return _literal.value.hint()->size() <= 32 && _literal.value.value() == valueOfLiteral(*_literal.value.hint(), _literal.kind).value();
+
+	return true;
+}
+
+bool solidity::yul::validNumberLiteral(solidity::yul::Literal const& _literal)
+{
+	if (_literal.kind != LiteralKind::Number || _literal.value.unlimited())
+		return false;
+
+	if (!_literal.value.hint())
+		return true;
+
+	auto const& repr = *_literal.value.hint();
+
+	if (!isValidDecimal(repr) && !isValidHex(repr))
+		return false;
+
+	if (bigint(repr) > u256(-1))
+		return false;
+
+	if (_literal.value.value() != valueOfLiteral(repr, _literal.kind).value())
+		return false;
+
+	return true;
+}
+
+bool solidity::yul::validBoolLiteral(solidity::yul::Literal const& _literal)
+{
+	if (_literal.kind != LiteralKind::Boolean || _literal.value.unlimited())
+		return false;
+
+	if (_literal.value.hint() && !(*_literal.value.hint() == "true" || *_literal.value.hint() == "false"))
+		return false;
+
+	yulAssert(u256(0) == u256(false));
+	yulAssert(u256(1) == u256(true));
+
+	if (_literal.value.hint())
+	{
+		if (*_literal.value.hint() == "false")
+			return _literal.value.value() == false;
+		else
+			return _literal.value.value() == true;
+	}
+
+	return _literal.value.value() == true || _literal.value.value() == false;
 }
 
 template<>
 bool Less<Literal>::operator()(Literal const& _lhs, Literal const& _rhs) const
 {
-	if (std::make_tuple(_lhs.kind, _lhs.type) != std::make_tuple(_rhs.kind, _rhs.type))
-		return std::make_tuple(_lhs.kind, _lhs.type) < std::make_tuple(_rhs.kind, _rhs.type);
+	if (_lhs.kind != _rhs.kind)
+		return _lhs.kind < _rhs.kind;
 
-	if (_lhs.kind == LiteralKind::Number)
-		return valueOfNumberLiteral(_lhs) < valueOfNumberLiteral(_rhs);
-	else
-		return _lhs.value < _rhs.value;
+	if (_lhs.value.unlimited() && _rhs.value.unlimited())
+		yulAssert(
+			_lhs.kind == LiteralKind::String && _rhs.kind == LiteralKind::String,
+			"Cannot have unlimited value that is not of String kind."
+		);
+
+	return _lhs.value < _rhs.value;
+
 }
 
 bool SwitchCaseCompareByLiteralValue::operator()(Case const* _lhs, Case const* _rhs) const
@@ -148,3 +241,40 @@ bool SwitchCaseCompareByLiteralValue::operator()(Case const* _lhs, Case const* _
 	yulAssert(_lhs && _rhs, "");
 	return Less<Literal*>{}(_lhs->value.get(), _rhs->value.get());
 }
+
+std::string_view yul::resolveFunctionName(FunctionName const& _functionName, Dialect const& _dialect)
+{
+	GenericVisitor visitor{
+		[&](Identifier const& _identifier) -> std::string const& { return _identifier.name.str(); },
+		[&](BuiltinName const& _builtin) -> std::string const& { return _dialect.builtin(_builtin.handle).name; }
+	};
+	return std::visit(visitor, _functionName);
+}
+
+BuiltinFunction const* yul::resolveBuiltinFunction(FunctionName const& _functionName, Dialect const& _dialect)
+{
+	GenericVisitor visitor{
+		[&](Identifier const&) -> BuiltinFunction const* { return nullptr; },
+		[&](BuiltinName const& _builtin) -> BuiltinFunction const* { return &_dialect.builtin(_builtin.handle); }
+	};
+	return std::visit(visitor, _functionName);
+}
+
+BuiltinFunctionForEVM const* yul::resolveBuiltinFunctionForEVM(FunctionName const& _functionName, EVMDialect const& _dialect)
+{
+	GenericVisitor visitor{
+		[&](Identifier const&) -> BuiltinFunctionForEVM const* { return nullptr; },
+		[&](BuiltinName const& _builtin) -> BuiltinFunctionForEVM const* { return &_dialect.builtin(_builtin.handle); }
+	};
+	return std::visit(visitor, _functionName);
+}
+
+FunctionHandle yul::functionNameToHandle(FunctionName const& _functionName)
+{
+	GenericVisitor visitor{
+		[&](Identifier const& _identifier) -> FunctionHandle { return _identifier.name; },
+		[&](BuiltinName const& _builtin) -> FunctionHandle { return _builtin.handle; }
+	};
+	return std::visit(visitor, _functionName);
+}
+

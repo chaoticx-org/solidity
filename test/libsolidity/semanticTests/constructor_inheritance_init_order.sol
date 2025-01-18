@@ -11,9 +11,9 @@ contract B is A {
     uint public y = f();
 }
 // ====
-// compileToEwasm: also
 // compileViaYul: true
 // ----
 // constructor() ->
-// gas irOptimized: 121557
+// gas irOptimized: 99436
+// gas irOptimized code: 20200
 // y() -> 42

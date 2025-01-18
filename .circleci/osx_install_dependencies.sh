@@ -26,12 +26,8 @@
 # ------------------------------------------------------------------------------
 
 # note that the following directories may be cached by circleci:
-# - /usr/local/bin
-# - /usr/local/sbin
-# - /usr/local/lib
-# - /usr/local/include
-# - /usr/local/Cellar
-# - /usr/local/Homebrew
+# - /usr/local
+# - /opt/homebrew
 
 set -eu
 
@@ -52,40 +48,72 @@ function validate_checksum {
 
 if [ ! -f /usr/local/lib/libz3.a ] # if this file does not exists (cache was not restored), rebuild dependencies
 then
-  brew unlink python
-  brew install boost
+  brew update
+  brew upgrade
   brew install cmake
   brew install wget
   brew install coreutils
   brew install diffutils
-  ./scripts/install_obsolete_jsoncpp_1_7_4.sh
+  brew install grep
+  # JRE is required to run eldarica solver
+  brew install openjdk@11
+  brew install unzip
+
+  # writing to /usr/local/lib need administrative privileges.
+  sudo ./scripts/install_obsolete_jsoncpp_1_7_4.sh
+
+  # boost
+  boost_version="1.84.0"
+  boost_package="boost_${boost_version//./_}.tar.bz2"
+  boost_dir="boost_${boost_version//./_}"
+  wget "https://archives.boost.io/release/$boost_version/source/$boost_package"
+  tar xf "$boost_package"
+  rm "$boost_package"
+  cd "$boost_dir"
+  ./bootstrap.sh --with-toolset=clang --with-libraries=thread,system,filesystem,program_options,serialization,test
+  # the default number of jobs that b2 is taking, is the number of detected available CPU threads.
+  sudo ./b2 -a address-model=64 architecture=arm+x86 install
+  cd ..
+  sudo rm -rf "$boost_dir"
+
+  # eldarica
+  eldarica_version="2.1"
+  wget "https://github.com/uuverifiers/eldarica/releases/download/v${eldarica_version}/eldarica-bin-${eldarica_version}.zip" -O /tmp/eld_binaries.zip
+  validate_checksum /tmp/eld_binaries.zip 0ac43f45c0925383c9d2077f62bbb515fd792375f3b2b101b30c9e81dcd7785c
+  unzip /tmp/eld_binaries.zip -d /tmp
+  sudo mv /tmp/eldarica/{eld,eld-client,target,eldEnv} /usr/local/bin
+  rm -rf /tmp/{eldarica,eld_binaries.zip}
+
+  #cvc5
+  cvc5_version="1.2.0"
+  cvc5_archive_name="cvc5-macOS-arm64-static"
+  wget "https://github.com/cvc5/cvc5/releases/download/cvc5-${cvc5_version}/${cvc5_archive_name}.zip" -O /tmp/cvc5.zip
+  validate_checksum /tmp/cvc5.zip 57d2d4855af3f3865110a254e415098b4e150a655f297010e27eb292f48f7da7
+  sudo unzip -j /tmp/cvc5.zip "${cvc5_archive_name}/bin/cvc5" -d /usr/local/bin
+  rm -f /tmp/cvc5.zip
 
   # z3
-  z3_version="4.8.17"
-  z3_dir="z3-${z3_version}-x64-osx-10.16"
-  z3_package="${z3_dir}.zip"
-  wget "https://github.com/Z3Prover/z3/releases/download/z3-${z3_version}/${z3_package}"
-  validate_checksum "$z3_package" 189667930517aee07f1ce36485d5924a9a2cb4f8c3c9586b03e714a2c657541a
-  unzip "$z3_package"
+  z3_version="4.13.3"
+  z3_dir="z3-z3-$z3_version"
+  z3_package="z3-$z3_version.tar.gz"
+  wget "https://github.com/Z3Prover/z3/archive/refs/tags/$z3_package"
+  validate_checksum "$z3_package" f59c9cf600ea57fb64ffeffbffd0f2d2b896854f339e846f48f069d23bc14ba0
+  tar xf "$z3_package"
   rm "$z3_package"
-  cp "${z3_dir}/bin/libz3.a" /usr/local/lib
-  cp "${z3_dir}/bin/z3" /usr/local/bin
-  cp "${z3_dir}/include/"* /usr/local/include
-  rm -r "$z3_dir"
+  cd "$z3_dir"
+  mkdir build
+  cd build
+  cmake -DCMAKE_OSX_ARCHITECTURES:STRING="x86_64;arm64" -DZ3_BUILD_LIBZ3_SHARED=false ..
+  make -j "$(nproc)"
+  sudo make install
+  cd ../..
+  rm -rf "$z3_dir"
 
   # evmone
-  evmone_version="0.8.0"
-  evmone_package="evmone-${evmone_version}-darwin-x86_64.tar.gz"
+  evmone_version="0.12.0"
+  evmone_package="evmone-${evmone_version}-darwin-arm64.tar.gz"
   wget "https://github.com/ethereum/evmone/releases/download/v${evmone_version}/${evmone_package}"
-  validate_checksum "$evmone_package" e8efef478822f0ed6d0493e89004181e895893f93963152a2a81589acc3a0828
-  tar xzpf "$evmone_package" -C /usr/local
+  validate_checksum "$evmone_package" e164e0d2b985cc1cca07b501538b2e804bf872d1d8d531f9241d518a886234a6
+  sudo tar xzpf "$evmone_package" -C /usr/local
   rm "$evmone_package"
-
-  # hera
-  hera_version="0.5.0"
-  hera_package="hera-${hera_version}-darwin-x86_64.tar.gz"
-  wget "https://github.com/ewasm/hera/releases/download/v${hera_version}/${hera_package}"
-  validate_checksum "$hera_package" 190050d7ace384ecd79ec1b1f607a9ff40e196b4eec75932958d4814d221d059
-  tar xzpf "$hera_package" -C /usr/local
-  rm "$hera_package"
 fi

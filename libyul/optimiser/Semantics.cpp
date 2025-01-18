@@ -25,6 +25,7 @@
 #include <libyul/Exceptions.h>
 #include <libyul/AST.h>
 #include <libyul/Dialect.h>
+#include <libyul/Utilities.h>
 
 #include <libevmasm/SemanticInformation.h>
 
@@ -33,7 +34,6 @@
 
 #include <limits>
 
-using namespace std;
 using namespace solidity;
 using namespace solidity::yul;
 
@@ -41,7 +41,7 @@ using namespace solidity::yul;
 SideEffectsCollector::SideEffectsCollector(
 		Dialect const& _dialect,
 		Expression const& _expression,
-		map<YulString, SideEffects> const* _functionSideEffects
+		std::map<FunctionHandle, SideEffects> const* _functionSideEffects
 ):
 	SideEffectsCollector(_dialect, _functionSideEffects)
 {
@@ -57,7 +57,7 @@ SideEffectsCollector::SideEffectsCollector(Dialect const& _dialect, Statement co
 SideEffectsCollector::SideEffectsCollector(
 	Dialect const& _dialect,
 	Block const& _ast,
-	map<YulString, SideEffects> const* _functionSideEffects
+	std::map<FunctionHandle, SideEffects> const* _functionSideEffects
 ):
 	SideEffectsCollector(_dialect, _functionSideEffects)
 {
@@ -67,7 +67,7 @@ SideEffectsCollector::SideEffectsCollector(
 SideEffectsCollector::SideEffectsCollector(
 	Dialect const& _dialect,
 	ForLoop const& _ast,
-	map<YulString, SideEffects> const* _functionSideEffects
+	std::map<FunctionHandle, SideEffects> const* _functionSideEffects
 ):
 	SideEffectsCollector(_dialect, _functionSideEffects)
 {
@@ -78,11 +78,11 @@ void SideEffectsCollector::operator()(FunctionCall const& _functionCall)
 {
 	ASTWalker::operator()(_functionCall);
 
-	YulString functionName = _functionCall.functionName.name;
-	if (BuiltinFunction const* f = m_dialect.builtin(functionName))
-		m_sideEffects += f->sideEffects;
-	else if (m_functionSideEffects && m_functionSideEffects->count(functionName))
-		m_sideEffects += m_functionSideEffects->at(functionName);
+	FunctionHandle functionHandle = functionNameToHandle(_functionCall.functionName);
+	if (BuiltinFunction const* builtin = resolveBuiltinFunction(_functionCall.functionName, m_dialect))
+		m_sideEffects += builtin->sideEffects;
+	else if (m_functionSideEffects && m_functionSideEffects->count(functionHandle))
+		m_sideEffects += m_functionSideEffects->at(functionHandle);
 	else
 		m_sideEffects += SideEffects::worst();
 }
@@ -94,16 +94,30 @@ bool MSizeFinder::containsMSize(Dialect const& _dialect, Block const& _ast)
 	return finder.m_msizeFound;
 }
 
+bool MSizeFinder::containsMSize(Object const& _object)
+{
+	yulAssert(_object.dialect());
+	if (containsMSize(*_object.dialect(), _object.code()->root()))
+		return true;
+
+	for (std::shared_ptr<ObjectNode> const& node: _object.subObjects)
+		if (auto const* object = dynamic_cast<Object const*>(node.get()))
+			if (containsMSize(*object))
+				return true;
+
+	return false;
+}
+
 void MSizeFinder::operator()(FunctionCall const& _functionCall)
 {
 	ASTWalker::operator()(_functionCall);
 
-	if (BuiltinFunction const* f = m_dialect.builtin(_functionCall.functionName.name))
-		if (f->isMSize)
+	if (BuiltinFunction const* builtin = resolveBuiltinFunction(_functionCall.functionName, m_dialect))
+		if (builtin->isMSize)
 			m_msizeFound = true;
 }
 
-map<YulString, SideEffects> SideEffectsPropagator::sideEffects(
+std::map<FunctionHandle, SideEffects> SideEffectsPropagator::sideEffects(
 	Dialect const& _dialect,
 	CallGraph const& _directCallGraph
 )
@@ -114,8 +128,16 @@ map<YulString, SideEffects> SideEffectsPropagator::sideEffects(
 	// In the future, we should refine that, because the property
 	// is actually a bit different from "not movable".
 
-	map<YulString, SideEffects> ret;
-	for (auto const& function: _directCallGraph.functionsWithLoops + _directCallGraph.recursiveFunctions())
+	std::map<FunctionHandle, SideEffects> ret;
+	for (auto const& function: _directCallGraph.functionsWithLoops)
+	{
+		ret[function].movable = false;
+		ret[function].canBeRemoved = false;
+		ret[function].canBeRemovedIfNoMSize = false;
+		ret[function].cannotLoop = false;
+	}
+
+	for (auto const& function: _directCallGraph.recursiveFunctions())
 	{
 		ret[function].movable = false;
 		ret[function].canBeRemoved = false;
@@ -125,20 +147,20 @@ map<YulString, SideEffects> SideEffectsPropagator::sideEffects(
 
 	for (auto const& call: _directCallGraph.functionCalls)
 	{
-		YulString funName = call.first;
+		FunctionHandle funName = call.first;
 		SideEffects sideEffects;
-		auto _visit = [&, visited = std::set<YulString>{}](YulString _function, auto&& _recurse) mutable {
+		auto _visit = [&, visited = std::set<FunctionHandle>{}](FunctionHandle _function, auto&& _recurse) mutable {
 			if (!visited.insert(_function).second)
 				return;
 			if (sideEffects == SideEffects::worst())
 				return;
-			if (BuiltinFunction const* f = _dialect.builtin(_function))
-				sideEffects += f->sideEffects;
+			if (BuiltinHandle const* builtinHandle = std::get_if<BuiltinHandle>(&_function))
+				sideEffects += _dialect.builtin(*builtinHandle).sideEffects;
 			else
 			{
 				if (ret.count(_function))
 					sideEffects += ret[_function];
-				for (YulString callee: _directCallGraph.functionCalls.at(_function))
+				for (FunctionHandle const& callee: _directCallGraph.functionCalls.at(_function))
 					_recurse(callee, _recurse);
 			}
 		};
@@ -166,8 +188,8 @@ void MovableChecker::visit(Statement const&)
 	assertThrow(false, OptimizerException, "Movability for statement requested.");
 }
 
-pair<TerminationFinder::ControlFlow, size_t> TerminationFinder::firstUnconditionalControlFlowChange(
-	vector<Statement> const& _statements
+std::pair<TerminationFinder::ControlFlow, size_t> TerminationFinder::firstUnconditionalControlFlowChange(
+	std::vector<Statement> const& _statements
 )
 {
 	for (size_t i = 0; i < _statements.size(); ++i)
@@ -176,32 +198,32 @@ pair<TerminationFinder::ControlFlow, size_t> TerminationFinder::firstUncondition
 		if (controlFlow != ControlFlow::FlowOut)
 			return {controlFlow, i};
 	}
-	return {ControlFlow::FlowOut, numeric_limits<size_t>::max()};
+	return {ControlFlow::FlowOut, std::numeric_limits<size_t>::max()};
 }
 
 TerminationFinder::ControlFlow TerminationFinder::controlFlowKind(Statement const& _statement)
 {
 	if (
-		holds_alternative<VariableDeclaration>(_statement) &&
+		std::holds_alternative<VariableDeclaration>(_statement) &&
 		std::get<VariableDeclaration>(_statement).value &&
 		containsNonContinuingFunctionCall(*std::get<VariableDeclaration>(_statement).value)
 	)
 		return ControlFlow::Terminate;
 	else if (
-		holds_alternative<Assignment>(_statement) &&
+		std::holds_alternative<Assignment>(_statement) &&
 		containsNonContinuingFunctionCall(*std::get<Assignment>(_statement).value)
 	)
 		return ControlFlow::Terminate;
 	else if (
-		holds_alternative<ExpressionStatement>(_statement) &&
+		std::holds_alternative<ExpressionStatement>(_statement) &&
 		containsNonContinuingFunctionCall(std::get<ExpressionStatement>(_statement).expression)
 	)
 		return ControlFlow::Terminate;
-	else if (holds_alternative<Break>(_statement))
+	else if (std::holds_alternative<Break>(_statement))
 		return ControlFlow::Break;
-	else if (holds_alternative<Continue>(_statement))
+	else if (std::holds_alternative<Continue>(_statement))
 		return ControlFlow::Continue;
-	else if (holds_alternative<Leave>(_statement))
+	else if (std::holds_alternative<Leave>(_statement))
 		return ControlFlow::Leave;
 	else
 		return ControlFlow::FlowOut;
@@ -215,10 +237,13 @@ bool TerminationFinder::containsNonContinuingFunctionCall(Expression const& _exp
 			if (containsNonContinuingFunctionCall(arg))
 				return true;
 
-		if (auto builtin = m_dialect.builtin(functionCall->functionName.name))
+		if (BuiltinFunction const* builtin = resolveBuiltinFunction(functionCall->functionName, m_dialect))
 			return !builtin->controlFlowSideEffects.canContinue;
-		else if (m_functionSideEffects && m_functionSideEffects->count(functionCall->functionName.name))
-			return !m_functionSideEffects->at(functionCall->functionName.name).canContinue;
+
+		yulAssert(std::holds_alternative<Identifier>(functionCall->functionName));
+		auto const& name = std::get<Identifier>(functionCall->functionName).name;
+		if (m_functionSideEffects && m_functionSideEffects->count(name))
+			return !m_functionSideEffects->at(name).canContinue;
 	}
 	return false;
 }

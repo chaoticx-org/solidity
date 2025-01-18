@@ -10,9 +10,9 @@ if (DEFINED MSVC)
 	else()
 		get_filename_component(DEPS_DIR "${CMAKE_CURRENT_LIST_DIR}/../deps/install" ABSOLUTE)
 		set(ETH_DEPENDENCY_INSTALL_DIR
-			"${DEPS_DIR}/x64"					# Old location for deps.
-			"${DEPS_DIR}/win64"					# New location for deps.
-			"${DEPS_DIR}/win64/Release/share"	# LLVM shared cmake files.
+			"${DEPS_DIR}/x64"                 # Old location for deps.
+			"${DEPS_DIR}/win64"               # New location for deps.
+			"${DEPS_DIR}/win64/Release/share" # LLVM shared cmake files.
 		)
 	endif()
 	set (CMAKE_PREFIX_PATH ${ETH_DEPENDENCY_INSTALL_DIR} ${CMAKE_PREFIX_PATH})
@@ -37,7 +37,8 @@ if (WIN32)
 	find_package(Boost 1.77.0 QUIET REQUIRED COMPONENTS ${BOOST_COMPONENTS})
 else()
 	# Boost 1.65 is the first to also provide boost::get for rvalue-references (#5787).
-	find_package(Boost 1.65.0 QUIET REQUIRED COMPONENTS ${BOOST_COMPONENTS})
+	# Boost 1.67 moved container_hash into is own module.
+	find_package(Boost 1.67.0 QUIET REQUIRED COMPONENTS ${BOOST_COMPONENTS})
 endif()
 
 # If cmake is older than boost and boost is older than 1.70,

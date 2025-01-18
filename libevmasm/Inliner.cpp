@@ -38,14 +38,13 @@
 #include <optional>
 #include <limits>
 
-using namespace std;
 using namespace solidity;
 using namespace solidity::evmasm;
 
 
 namespace
 {
-/// @returns an estimation of the runtime gas cost of the AsssemblyItems in @a _itemRange.
+/// @returns an estimation of the runtime gas cost of the AssemblyItems in @a _itemRange.
 template<typename RangeType>
 u256 executionCost(RangeType const& _itemRange, langutil::EVMVersion _evmVersion)
 {
@@ -54,26 +53,26 @@ u256 executionCost(RangeType const& _itemRange, langutil::EVMVersion _evmVersion
 		[&gasMeter](auto const& _item) { return gasMeter.estimateMax(_item, false); }
 	), GasMeter::GasConsumption());
 	if (gasConsumption.isInfinite)
-		return numeric_limits<u256>::max();
+		return std::numeric_limits<u256>::max();
 	else
 		return gasConsumption.value;
 }
 /// @returns an estimation of the code size in bytes needed for the AssemblyItems in @a _itemRange.
 template<typename RangeType>
-uint64_t codeSize(RangeType const& _itemRange)
+uint64_t codeSize(RangeType const& _itemRange, langutil::EVMVersion _evmVersion)
 {
 	return ranges::accumulate(_itemRange | ranges::views::transform(
-		[](auto const& _item) { return _item.bytesRequired(2, Precision::Approximate); }
+		[&](auto const& _item) { return _item.bytesRequired(2, _evmVersion, Precision::Approximate); }
 	), 0u);
 }
-/// @returns the tag id, if @a _item is a PushTag or Tag into the current subassembly, nullopt otherwise.
-optional<size_t> getLocalTag(AssemblyItem const& _item)
+/// @returns the tag id, if @a _item is a PushTag or Tag into the current subassembly, std::nullopt otherwise.
+std::optional<size_t> getLocalTag(AssemblyItem const& _item)
 {
 	if (_item.type() != PushTag && _item.type() != Tag)
-		return nullopt;
+		return std::nullopt;
 	auto [subId, tag] = _item.splitForeignPushTag();
-	if (subId != numeric_limits<size_t>::max())
-		return nullopt;
+	if (subId != std::numeric_limits<size_t>::max())
+		return std::nullopt;
 	return tag;
 }
 }
@@ -99,7 +98,7 @@ bool Inliner::isInlineCandidate(size_t _tag, ranges::span<AssemblyItem const> _i
 	return true;
 }
 
-map<size_t, Inliner::InlinableBlock> Inliner::determineInlinableBlocks(AssemblyItems const& _items) const
+std::map<size_t, Inliner::InlinableBlock> Inliner::determineInlinableBlocks(AssemblyItems const& _items) const
 {
 	std::map<size_t, ranges::span<AssemblyItem const>> inlinableBlockItems;
 	std::map<size_t, uint64_t> numPushTags;
@@ -108,7 +107,7 @@ map<size_t, Inliner::InlinableBlock> Inliner::determineInlinableBlocks(AssemblyI
 	{
 		// The number of PushTags approximates the number of calls to a block.
 		if (item.type() == PushTag)
-			if (optional<size_t> tag = getLocalTag(item))
+			if (std::optional<size_t> tag = getLocalTag(item))
 				++numPushTags[*tag];
 
 		// We can only inline blocks with straight control flow that end in a jump.
@@ -116,7 +115,7 @@ map<size_t, Inliner::InlinableBlock> Inliner::determineInlinableBlocks(AssemblyI
 		if (lastTag && SemanticInformation::breaksCSEAnalysisBlock(item, false))
 		{
 			ranges::span<AssemblyItem const> block = _items | ranges::views::slice(*lastTag + 1, index + 1);
-			if (optional<size_t> tag = getLocalTag(_items[*lastTag]))
+			if (std::optional<size_t> tag = getLocalTag(_items[*lastTag]))
 				if (isInlineCandidate(*tag, block))
 					inlinableBlockItems[*tag] = block;
 			lastTag.reset();
@@ -130,7 +129,7 @@ map<size_t, Inliner::InlinableBlock> Inliner::determineInlinableBlocks(AssemblyI
 	}
 
 	// Store the number of PushTags alongside the assembly items and discard tags that are never pushed.
-	map<size_t, InlinableBlock> result;
+	std::map<size_t, InlinableBlock> result;
 	for (auto&& [tag, items]: inlinableBlockItems)
 		if (uint64_t const* numPushes = util::valueOrNullptr(numPushTags, tag))
 			result.emplace(tag, InlinableBlock{items, *numPushes});
@@ -140,7 +139,7 @@ map<size_t, Inliner::InlinableBlock> Inliner::determineInlinableBlocks(AssemblyI
 bool Inliner::shouldInlineFullFunctionBody(size_t _tag, ranges::span<AssemblyItem const> _block, uint64_t _pushTagCount) const
 {
 	// Accumulate size of the inline candidate block in bytes (without the return jump).
-	uint64_t functionBodySize = codeSize(ranges::views::drop_last(_block, 1));
+	uint64_t functionBodySize = codeSize(ranges::views::drop_last(_block, 1), m_evmVersion);
 
 	// Use the number of push tags as approximation of the average number of calls to the function per run.
 	uint64_t numberOfCalls = _pushTagCount;
@@ -168,8 +167,8 @@ bool Inliner::shouldInlineFullFunctionBody(size_t _tag, ranges::span<AssemblyIte
 	);
 	// Each call site deposits the call site pattern, whereas the jump site pattern and the function itself are deposited once.
 	bigint uninlinedDepositCost = GasMeter::dataGas(
-		numberOfCallSites * codeSize(uninlinedCallSitePattern) +
-		codeSize(uninlinedFunctionPattern) +
+		numberOfCallSites * codeSize(uninlinedCallSitePattern, m_evmVersion) +
+		codeSize(uninlinedFunctionPattern, m_evmVersion) +
 		functionBodySize,
 		m_isCreation,
 		m_evmVersion
@@ -186,7 +185,7 @@ bool Inliner::shouldInlineFullFunctionBody(size_t _tag, ranges::span<AssemblyIte
 	// the heuristics is optimistic.
 	if (m_tagsReferencedFromOutside.count(_tag))
 		inlinedDepositCost += GasMeter::dataGas(
-			codeSize(uninlinedFunctionPattern) + functionBodySize,
+			codeSize(uninlinedFunctionPattern, m_evmVersion) + functionBodySize,
 			m_isCreation,
 			m_evmVersion
 		);
@@ -199,7 +198,7 @@ bool Inliner::shouldInlineFullFunctionBody(size_t _tag, ranges::span<AssemblyIte
 	return false;
 }
 
-optional<AssemblyItem> Inliner::shouldInline(size_t _tag, AssemblyItem const& _jump, InlinableBlock const& _block) const
+std::optional<AssemblyItem> Inliner::shouldInline(size_t _tag, AssemblyItem const& _jump, InlinableBlock const& _block) const
 {
 	assertThrow(_jump == Instruction::JUMP, OptimizerException, "");
 	AssemblyItem blockExit = _block.items.back();
@@ -226,13 +225,13 @@ optional<AssemblyItem> Inliner::shouldInline(size_t _tag, AssemblyItem const& _j
 			AssemblyItem{Instruction::JUMP},
 		};
 		if (
-			GasMeter::dataGas(codeSize(_block.items), m_isCreation, m_evmVersion) <=
-			GasMeter::dataGas(codeSize(jumpPattern), m_isCreation, m_evmVersion)
+			GasMeter::dataGas(codeSize(_block.items, m_evmVersion), m_isCreation, m_evmVersion) <=
+			GasMeter::dataGas(codeSize(jumpPattern, m_evmVersion), m_isCreation, m_evmVersion)
 		)
 			return blockExit;
 	}
 
-	return nullopt;
+	return std::nullopt;
 }
 
 
@@ -252,19 +251,19 @@ void Inliner::optimise()
 			AssemblyItem const& nextItem = *next(it);
 			if (item.type() == PushTag && nextItem == Instruction::JUMP)
 			{
-				if (optional<size_t> tag = getLocalTag(item))
+				if (std::optional<size_t> tag = getLocalTag(item))
 					if (auto* inlinableBlock = util::valueOrNullptr(inlinableBlocks, *tag))
 						if (auto exitItem = shouldInline(*tag, nextItem, *inlinableBlock))
 						{
 							newItems += inlinableBlock->items | ranges::views::drop_last(1);
-							newItems.emplace_back(move(*exitItem));
+							newItems.emplace_back(std::move(*exitItem));
 
 							// We are removing one push tag to the block we inline.
 							--inlinableBlock->pushTagCount;
 							// We might increase the number of push tags to other blocks.
 							for (AssemblyItem const& inlinedItem: inlinableBlock->items)
 								if (inlinedItem.type() == PushTag)
-									if (optional<size_t> duplicatedTag = getLocalTag(inlinedItem))
+									if (std::optional<size_t> duplicatedTag = getLocalTag(inlinedItem))
 										if (auto* block = util::valueOrNullptr(inlinableBlocks, *duplicatedTag))
 											++block->pushTagCount;
 
@@ -277,5 +276,5 @@ void Inliner::optimise()
 		newItems.emplace_back(item);
 	}
 
-	m_items = move(newItems);
+	m_items = std::move(newItems);
 }

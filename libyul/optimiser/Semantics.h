@@ -21,16 +21,17 @@
 
 #pragma once
 
-#include <libyul/optimiser/ASTWalker.h>
-#include <libyul/SideEffects.h>
-#include <libyul/optimiser/CallGraphGenerator.h>
 #include <libyul/AST.h>
+#include <libyul/Object.h>
+#include <libyul/SideEffects.h>
+#include <libyul/optimiser/ASTWalker.h>
+#include <libyul/optimiser/CallGraphGenerator.h>
 
 #include <set>
 
 namespace solidity::yul
 {
-struct Dialect;
+class Dialect;
 
 /**
  * Specific AST walker that determines side-effect free-ness and movability of code.
@@ -41,23 +42,23 @@ class SideEffectsCollector: public ASTWalker
 public:
 	explicit SideEffectsCollector(
 		Dialect const& _dialect,
-		std::map<YulString, SideEffects> const* _functionSideEffects = nullptr
+		std::map<FunctionHandle, SideEffects> const* _functionSideEffects = nullptr
 	): m_dialect(_dialect), m_functionSideEffects(_functionSideEffects) {}
 	SideEffectsCollector(
 		Dialect const& _dialect,
 		Expression const& _expression,
-		std::map<YulString, SideEffects> const* _functionSideEffects = nullptr
+		std::map<FunctionHandle, SideEffects> const* _functionSideEffects = nullptr
 	);
 	SideEffectsCollector(Dialect const& _dialect, Statement const& _statement);
 	SideEffectsCollector(
 		Dialect const& _dialect,
 		Block const& _ast,
-		std::map<YulString, SideEffects> const* _functionSideEffects = nullptr
+		std::map<FunctionHandle, SideEffects> const* _functionSideEffects = nullptr
 	);
 	SideEffectsCollector(
 		Dialect const& _dialect,
 		ForLoop const& _ast,
-		std::map<YulString, SideEffects> const* _functionSideEffects = nullptr
+		std::map<FunctionHandle, SideEffects> const* _functionSideEffects = nullptr
 	);
 
 	using ASTWalker::operator();
@@ -77,7 +78,8 @@ public:
 			!m_sideEffects.movableApartFromEffects ||
 			m_sideEffects.storage == SideEffects::Write ||
 			m_sideEffects.otherState == SideEffects::Write ||
-			m_sideEffects.memory == SideEffects::Write
+			m_sideEffects.memory == SideEffects::Write ||
+			m_sideEffects.transientStorage == SideEffects::Write
 		)
 			return false;
 
@@ -91,6 +93,10 @@ public:
 
 		if (m_sideEffects.memory == SideEffects::Read)
 			if (_codeContainsMSize || _other.memory == SideEffects::Write)
+				return false;
+
+		if (m_sideEffects.transientStorage == SideEffects::Read)
+			if (_other.transientStorage == SideEffects::Write)
 				return false;
 
 		return true;
@@ -111,7 +117,7 @@ public:
 
 private:
 	Dialect const& m_dialect;
-	std::map<YulString, SideEffects> const* m_functionSideEffects = nullptr;
+	std::map<FunctionHandle, SideEffects> const* m_functionSideEffects = nullptr;
 	SideEffects m_sideEffects;
 };
 
@@ -124,7 +130,7 @@ private:
 class SideEffectsPropagator
 {
 public:
-	static std::map<YulString, SideEffects> sideEffects(
+	static std::map<FunctionHandle, SideEffects> sideEffects(
 		Dialect const& _dialect,
 		CallGraph const& _directCallGraph
 	);
@@ -143,6 +149,7 @@ class MSizeFinder: public ASTWalker
 {
 public:
 	static bool containsMSize(Dialect const& _dialect, Block const& _ast);
+	static bool containsMSize(Object const& _object);
 
 	using ASTWalker::operator();
 	void operator()(FunctionCall const& _funCall) override;
@@ -188,7 +195,7 @@ class MovableChecker: public SideEffectsCollector
 public:
 	explicit MovableChecker(
 		Dialect const& _dialect,
-		std::map<YulString, SideEffects> const* _functionSideEffects = nullptr
+		std::map<FunctionHandle, SideEffects> const* _functionSideEffects = nullptr
 	): SideEffectsCollector(_dialect, _functionSideEffects) {}
 	MovableChecker(Dialect const& _dialect, Expression const& _expression);
 
@@ -198,11 +205,11 @@ public:
 	void visit(Statement const&) override;
 	using ASTWalker::visit;
 
-	std::set<YulString> const& referencedVariables() const { return m_variableReferences; }
+	std::set<YulName> const& referencedVariables() const { return m_variableReferences; }
 
 private:
 	/// Which variables the current expression references.
-	std::set<YulString> m_variableReferences;
+	std::set<YulName> m_variableReferences;
 };
 
 struct ControlFlowSideEffects;
@@ -224,7 +231,7 @@ public:
 
 	TerminationFinder(
 		Dialect const& _dialect,
-		std::map<YulString, ControlFlowSideEffects> const* _functionSideEffects = nullptr
+		std::map<YulName, ControlFlowSideEffects> const* _functionSideEffects = nullptr
 	): m_dialect(_dialect), m_functionSideEffects(_functionSideEffects) {}
 
 	/// @returns the index of the first statement in the provided sequence
@@ -249,7 +256,7 @@ public:
 
 private:
 	Dialect const& m_dialect;
-	std::map<YulString, ControlFlowSideEffects> const* m_functionSideEffects;
+	std::map<YulName, ControlFlowSideEffects> const* m_functionSideEffects;
 };
 
 }

@@ -6,7 +6,7 @@
 ## You can pass a branch name as argument to this script (which, if no argument is given,
 ## will default to "develop").
 ##
-## If the given branch is "release", the resulting package will be uploaded to
+## If the given branch matches a release version tag, the resulting package will be uploaded to
 ## ethereum/ethereum PPA, or ethereum/ethereum-dev PPA otherwise.
 ##
 ## It will clone the Solidity git from github, determine the version,
@@ -23,22 +23,22 @@
 ## Additionally the following entries in /etc/dput.cf are required:
 ##
 ##  [ethereum-dev]
-##  fqdn			= ppa.launchpad.net
-##  method			= ftp
-##  incoming		= ~ethereum/ethereum-dev
-##  login			= anonymous
+##  fqdn            = ppa.launchpad.net
+##  method          = ftp
+##  incoming        = ~ethereum/ethereum-dev
+##  login           = anonymous
 ##
 ##  [ethereum]
-##  fqdn			= ppa.launchpad.net
-##  method			= ftp
-##  incoming		= ~ethereum/ethereum
-##  login			= anonymous
+##  fqdn            = ppa.launchpad.net
+##  method          = ftp
+##  incoming        = ~ethereum/ethereum
+##  login           = anonymous
 ##
 ##  [ethereum-static]
-##  fqdn			= ppa.launchpad.net
-##  method			= ftp
-##  incoming		= ~ethereum/ethereum-static
-##  login			= anonymous
+##  fqdn            = ppa.launchpad.net
+##  method          = ftp
+##  incoming        = ~ethereum/ethereum-static
+##  login           = anonymous
 ##
 ##############################################################################
 
@@ -47,7 +47,6 @@ set -e
 
 REPO_ROOT="$(dirname "$0")/.."
 
-# for the "fail" function
 # shellcheck source=scripts/common.sh
 source "${REPO_ROOT}/scripts/common.sh"
 
@@ -62,28 +61,14 @@ is_release() {
     [[ "${branch}" =~ ^v[0-9]+(\.[0-9]+)*$ ]]
 }
 
-# source keyid and email from .release_ppa_auth
-if [[ -e .release_ppa_auth ]]
-then
-    # shellcheck source=/dev/null
-    source "${REPO_ROOT}/.release_ppa_auth"
-fi
-
-[[ "$LAUNCHPAD_KEYID" != "" && "$LAUNCHPAD_EMAIL" != "" ]] || \
-    fail "Error: Couldn't find variables \$LAUNCHPAD_KEYID or \$LAUNCHPAD_EMAIL in sourced file .release_ppa_auth (check top comment in $0 for more information)."
+sourcePPAConfig
 
 packagename=solc
 
 # This needs to be a still active release
 static_build_distribution=focal
 
-DISTRIBUTIONS="focal jammy kinetic"
-
-function checkDputEntries {
-    local pattern="$1"
-    grep "${pattern}" /etc/dput.cf --quiet || \
-        fail "Error: Missing ${pattern//\\/} section in /etc/dput.cf (check top comment in ${0} for more information)."
-}
+DISTRIBUTIONS="focal jammy noble oracular"
 
 if is_release
 then
@@ -138,12 +123,6 @@ ppafilesurl=https://launchpad.net/~ethereum/+archive/ubuntu/${pparepo}/+files
 git clone --depth 2 --recursive https://github.com/ethereum/solidity.git -b "$branch"
 mv solidity solc
 
-# Fetch dependencies
-mkdir -p ./solc/deps/downloads/ 2>/dev/null || true
-wget -O ./solc/deps/downloads/jsoncpp-1.9.3.tar.gz https://github.com/open-source-parsers/jsoncpp/archive/1.9.3.tar.gz
-wget -O ./solc/deps/downloads/range-v3-0.12.0.tar.gz https://github.com/ericniebler/range-v3/archive/0.12.0.tar.gz
-wget -O ./solc/deps/downloads/fmt-8.0.1.tar.gz https://github.com/fmtlib/fmt/archive/8.0.1.tar.gz
-
 # Determine version
 cd solc
 version=$("$(dirname "$0")/get_version.sh")
@@ -188,7 +167,7 @@ Build-Depends: ${SMTDEPENDENCY}debhelper (>= 9.0.0),
                scons
 Standards-Version: 3.9.5
 Homepage: https://ethereum.org
-Vcs-Git: git://github.com/ethereum/solidity.git
+Vcs-Git: https://github.com/ethereum/solidity.git
 Vcs-Browser: https://github.com/ethereum/solidity
 
 Package: solc
@@ -225,14 +204,14 @@ export DH_OPTIONS
 override_dh_auto_test:
 
 #override_dh_installdocs:
-#	make -C docs html
-#	dh_installdocs docs/_build/html
+#    make -C docs html
+#    dh_installdocs docs/_build/html
 
 override_dh_shlibdeps:
 	dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info
 
 override_dh_auto_configure:
-	dh_auto_configure -- -DTESTS=OFF ${CMAKE_OPTIONS}
+	dh_auto_configure -- -DTESTS=OFF -DFETCHCONTENT_FULLY_DISCONNECTED=OFF ${CMAKE_OPTIONS}
 EOF
 cat <<EOF > debian/copyright
 Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/

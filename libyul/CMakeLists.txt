@@ -1,19 +1,3 @@
-# This will re-generate the polyfill headers, if any file within libyul/backends/wasm/polyfill/ was modified.
-set_directory_properties(PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/libyul/backends/wasm/polyfill/)
-
-set(POLYFILLS Arithmetic Bitwise Comparison Conversion Interface Keccak Logical Memory)
-set(GENERATED_POLYFILL_HEADERS)
-foreach(polyfill IN LISTS POLYFILLS)
-	set(POLYFILL_FILE ${CMAKE_SOURCE_DIR}/libyul/backends/wasm/polyfill/${polyfill}.yul)
-	file(READ ${POLYFILL_FILE} EWASM_POLYFILL_CONTENT HEX)
-	string(REGEX MATCHALL ".." EWASM_POLYFILL_CONTENT "${EWASM_POLYFILL_CONTENT}")
-	string(REGEX REPLACE ";" ",\n\t0x" EWASM_POLYFILL_CONTENT "${EWASM_POLYFILL_CONTENT}")
-	set(EWASM_POLYFILL_CONTENT "0x${EWASM_POLYFILL_CONTENT}")
-	set(EWASM_POLYFILL_NAME ${polyfill})
-	configure_file("${CMAKE_SOURCE_DIR}/cmake/templates/ewasm_polyfill.in" ${CMAKE_BINARY_DIR}/include/ewasmPolyfills/${polyfill}.h @ONLY)
-	list(APPEND GENERATED_POLYFILL_HEADERS ${CMAKE_BINARY_DIR}/include/ewasmPolyfills/${polyfill}.h)
-endforeach()
-
 add_library(yul
 	${GENERATED_POLYFILL_HEADERS}
 
@@ -21,6 +5,7 @@ add_library(yul
 	AsmAnalysis.h
 	AsmAnalysisInfo.h
 	AST.h
+	AST.cpp
 	ASTForward.h
 	AsmJsonConverter.h
 	AsmJsonConverter.cpp
@@ -30,6 +15,7 @@ add_library(yul
 	AsmParser.h
 	AsmPrinter.cpp
 	AsmPrinter.h
+	Builtins.h
 	YulStack.h
 	YulStack.cpp
 	CompilabilityChecker.cpp
@@ -44,6 +30,8 @@ add_library(yul
 	FunctionReferenceResolver.h
 	Object.cpp
 	Object.h
+	ObjectOptimizer.cpp
+	ObjectOptimizer.h
 	ObjectParser.cpp
 	ObjectParser.h
 	Scope.cpp
@@ -52,12 +40,17 @@ add_library(yul
 	ScopeFiller.h
 	Utilities.cpp
 	Utilities.h
+	YulControlFlowGraphExporter.h
+	YulControlFlowGraphExporter.cpp
+	YulName.h
 	YulString.h
 	backends/evm/AbstractAssembly.h
 	backends/evm/AsmCodeGen.cpp
 	backends/evm/AsmCodeGen.h
 	backends/evm/ConstantOptimiser.cpp
 	backends/evm/ConstantOptimiser.h
+	backends/evm/ControlFlow.cpp
+	backends/evm/ControlFlow.h
 	backends/evm/ControlFlowGraph.h
 	backends/evm/ControlFlowGraphBuilder.cpp
 	backends/evm/ControlFlowGraphBuilder.h
@@ -75,25 +68,21 @@ add_library(yul
 	backends/evm/NoOutputAssembly.cpp
 	backends/evm/OptimizedEVMCodeTransform.cpp
 	backends/evm/OptimizedEVMCodeTransform.h
+	backends/evm/SSACFGLiveness.cpp
+	backends/evm/SSACFGLiveness.h
+	backends/evm/SSACFGLoopNestingForest.cpp
+	backends/evm/SSACFGLoopNestingForest.h
+	backends/evm/SSACFGTopologicalSort.cpp
+	backends/evm/SSACFGTopologicalSort.h
+	backends/evm/SSAControlFlowGraph.cpp
+	backends/evm/SSAControlFlowGraph.h
+	backends/evm/SSAControlFlowGraphBuilder.cpp
+	backends/evm/SSAControlFlowGraphBuilder.h
 	backends/evm/StackHelpers.h
 	backends/evm/StackLayoutGenerator.cpp
 	backends/evm/StackLayoutGenerator.h
 	backends/evm/VariableReferenceCounter.h
 	backends/evm/VariableReferenceCounter.cpp
-	backends/wasm/EVMToEwasmTranslator.cpp
-	backends/wasm/EVMToEwasmTranslator.h
-	backends/wasm/BinaryTransform.cpp
-	backends/wasm/BinaryTransform.h
-	backends/wasm/TextTransform.cpp
-	backends/wasm/TextTransform.h
-	backends/wasm/WasmCodeTransform.cpp
-	backends/wasm/WasmCodeTransform.h
-	backends/wasm/WasmDialect.cpp
-	backends/wasm/WasmDialect.h
-	backends/wasm/WasmObjectCompiler.cpp
-	backends/wasm/WasmObjectCompiler.h
-	backends/wasm/WordSizeTransform.cpp
-	backends/wasm/WordSizeTransform.h
 	optimiser/ASTCopier.cpp
 	optimiser/ASTCopier.h
 	optimiser/ASTWalker.cpp
@@ -158,8 +147,6 @@ add_library(yul
 	optimiser/LoadResolver.h
 	optimiser/LoopInvariantCodeMotion.cpp
 	optimiser/LoopInvariantCodeMotion.h
-	optimiser/MainFunction.cpp
-	optimiser/MainFunction.h
 	optimiser/Metrics.cpp
 	optimiser/Metrics.h
 	optimiser/NameCollector.cpp
@@ -173,8 +160,6 @@ add_library(yul
 	optimiser/OptimiserStep.h
 	optimiser/OptimizerUtilities.cpp
 	optimiser/OptimizerUtilities.h
-	optimiser/ReasoningBasedSimplifier.cpp
-	optimiser/ReasoningBasedSimplifier.h
 	optimiser/UnusedAssignEliminator.cpp
 	optimiser/UnusedAssignEliminator.h
 	optimiser/UnusedStoreBase.cpp
@@ -183,8 +168,6 @@ add_library(yul
 	optimiser/UnusedStoreEliminator.h
 	optimiser/Rematerialiser.cpp
 	optimiser/Rematerialiser.h
-	optimiser/SMTSolver.cpp
-	optimiser/SMTSolver.h
 	optimiser/SSAReverser.cpp
 	optimiser/SSAReverser.h
 	optimiser/SSATransform.cpp
@@ -209,8 +192,6 @@ add_library(yul
 	optimiser/Suite.h
 	optimiser/SyntacticalEquality.cpp
 	optimiser/SyntacticalEquality.h
-	optimiser/TypeInfo.cpp
-	optimiser/TypeInfo.h
 	optimiser/UnusedFunctionParameterPruner.cpp
 	optimiser/UnusedFunctionParameterPruner.h
 	optimiser/UnusedFunctionsCommon.h

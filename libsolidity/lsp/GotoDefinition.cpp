@@ -30,37 +30,36 @@
 using namespace solidity::frontend;
 using namespace solidity::langutil;
 using namespace solidity::lsp;
-using namespace std;
 
-void GotoDefinition::operator()(MessageID _id, Json::Value const& _args)
+void GotoDefinition::operator()(MessageID _id, Json const& _args)
 {
 	auto const [sourceUnitName, lineColumn] = extractSourceUnitNameAndLineColumn(_args);
 
 	ASTNode const* sourceNode = m_server.astNodeAtSourceLocation(sourceUnitName, lineColumn);
 
-	vector<SourceLocation> locations;
+	std::vector<SourceLocation> locations;
 	if (auto const* expression = dynamic_cast<Expression const*>(sourceNode))
 	{
 		// Handles all expressions that can have one or more declaration annotation.
 		if (auto const* declaration = referencedDeclaration(expression))
 			if (auto location = declarationLocation(declaration))
-				locations.emplace_back(move(location.value()));
+				locations.emplace_back(std::move(location.value()));
 	}
 	else if (auto const* identifierPath = dynamic_cast<IdentifierPath const*>(sourceNode))
 	{
 		if (auto const* declaration = identifierPath->annotation().referencedDeclaration)
 			if (auto location = declarationLocation(declaration))
-				locations.emplace_back(move(location.value()));
+				locations.emplace_back(std::move(location.value()));
 	}
 	else if (auto const* importDirective = dynamic_cast<ImportDirective const*>(sourceNode))
 	{
 		auto const& path = *importDirective->annotation().absolutePath;
 		if (fileRepository().sourceUnits().count(path))
-			locations.emplace_back(SourceLocation{0, 0, make_shared<string const>(path)});
+			locations.emplace_back(SourceLocation{0, 0, std::make_shared<std::string const>(path)});
 	}
 
-	Json::Value reply = Json::arrayValue;
+	Json reply = Json::array();
 	for (SourceLocation const& location: locations)
-		reply.append(toJson(location));
+		reply.emplace_back(toJson(location));
 	client().reply(_id, reply);
 }

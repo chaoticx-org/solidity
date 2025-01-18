@@ -24,6 +24,8 @@
 #include <libyul/ASTForward.h>
 #include <libyul/optimiser/ASTWalker.h>
 
+#include <libevmasm/Instruction.h>
+
 #include <libsolutil/FixedHash.h>
 #include <libsolutil/CommonData.h>
 
@@ -33,7 +35,7 @@
 
 namespace solidity::yul
 {
-struct Dialect;
+class Dialect;
 }
 
 namespace solidity::yul::test
@@ -44,6 +46,10 @@ class InterpreterTerminatedGeneric: public util::Exception
 };
 
 class ExplicitlyTerminated: public InterpreterTerminatedGeneric
+{
+};
+
+class ExplicitlyTerminatedWithReturn: public ExplicitlyTerminated
 {
 };
 
@@ -75,6 +81,7 @@ struct InterpreterState
 	/// This is different than memory.size() because we ignore gas.
 	u256 msize;
 	std::map<util::h256, util::h256> storage;
+	std::map<util::h256, util::h256> transientStorage;
 	util::h160 address = util::h160("0x0000000000000000000000000000000011111111");
 	u256 balance = 0x22222222;
 	u256 selfbalance = 0x22223333;
@@ -88,10 +95,13 @@ struct InterpreterState
 	u256 timestamp = 0x88888888;
 	u256 blockNumber = 1024;
 	u256 difficulty = 0x9999999;
+	u256 prevrandao = (u256(1) << 64) + 1;
 	u256 gaslimit = 4000000;
 	u256 chainid = 0x01;
 	/// The minimum value of basefee: 7 wei.
 	u256 basefee = 0x07;
+	/// The minimum value of blobbasefee: 1 wei.
+	u256 blobbasefee = 0x01;
 	/// Log of changes / effects. Sholud be structured data in the future.
 	std::vector<std::string> trace;
 	/// This is actually an input parameter that more or less limits the runtime.
@@ -101,6 +111,14 @@ struct InterpreterState
 	size_t maxExprNesting = 0;
 	ControlFlowState controlFlowState = ControlFlowState::Default;
 
+	/// Number of the current state instance, used for recursion protection
+	size_t numInstance = 0;
+
+	// Blob commitment hash version
+	util::FixedHash<1> const blobHashVersion = util::FixedHash<1>(1);
+	// Blob commitments
+	std::array<u256, 2> const blobCommitments = {0x01, 0x02};
+
 	/// Prints execution trace and non-zero storage to @param _out.
 	/// Flag @param _disableMemoryTrace, if set, does not produce a memory dump. This
 	/// avoids false positives reports by the fuzzer when certain optimizer steps are
@@ -108,6 +126,17 @@ struct InterpreterState
 	void dumpTraceAndState(std::ostream& _out, bool _disableMemoryTrace) const;
 	/// Prints non-zero storage to @param _out.
 	void dumpStorage(std::ostream& _out) const;
+	/// Prints non-zero transient storage to @param _out.
+	void dumpTransientStorage(std::ostream& _out) const;
+
+	bytes readMemory(u256 const& _offset, u256 const& _size)
+	{
+		yulAssert(_size <= 0xffff, "Too large read.");
+		bytes data(size_t(_size), uint8_t(0));
+		for (size_t i = 0; i < data.size(); ++i)
+			data[i] = memory[_offset + i];
+		return data;
+	}
 };
 
 /**
@@ -116,7 +145,7 @@ struct InterpreterState
 struct Scope
 {
 	/// Used for variables and functions. Value is nullptr for variables.
-	std::map<YulString, FunctionDefinition const*> names;
+	std::map<YulName, FunctionDefinition const*> names;
 	std::map<Block const*, std::unique_ptr<Scope>> subScopes;
 	Scope* parent = nullptr;
 };
@@ -135,6 +164,7 @@ public:
 		InterpreterState& _state,
 		Dialect const& _dialect,
 		Block const& _ast,
+		bool _disableExternalCalls,
 		bool _disableMemoryTracing
 	);
 
@@ -142,13 +172,15 @@ public:
 		InterpreterState& _state,
 		Dialect const& _dialect,
 		Scope& _scope,
+		bool _disableExternalCalls,
 		bool _disableMemoryTracing,
-		std::map<YulString, u256> _variables = {}
+		std::map<YulName, u256> _variables = {}
 	):
 		m_dialect(_dialect),
 		m_state(_state),
 		m_variables(std::move(_variables)),
 		m_scope(&_scope),
+		m_disableExternalCalls(_disableExternalCalls),
 		m_disableMemoryTrace(_disableMemoryTracing)
 	{
 	}
@@ -165,15 +197,16 @@ public:
 	void operator()(Leave const&) override;
 	void operator()(Block const& _block) override;
 
+	bytes returnData() const { return m_state.returndata; }
 	std::vector<std::string> const& trace() const { return m_state.trace; }
 
-	u256 valueOfVariable(YulString _name) const { return m_variables.at(_name); }
+	u256 valueOfVariable(YulName _name) const { return m_variables.at(_name); }
 
-private:
+protected:
 	/// Asserts that the expression evaluates to exactly one value and returns it.
-	u256 evaluate(Expression const& _expression);
+	virtual u256 evaluate(Expression const& _expression);
 	/// Evaluates the expression and returns its value.
-	std::vector<u256> evaluateMulti(Expression const& _expression);
+	virtual std::vector<u256> evaluateMulti(Expression const& _expression);
 
 	void enterScope(Block const& _block);
 	void leaveScope();
@@ -185,8 +218,11 @@ private:
 	Dialect const& m_dialect;
 	InterpreterState& m_state;
 	/// Values of variables.
-	std::map<YulString, u256> m_variables;
+	std::map<YulName, u256> m_variables;
 	Scope* m_scope;
+	/// If not set, external calls (e.g. using `call()`) to the same contract
+	/// are evaluated in a new parser instance.
+	bool m_disableExternalCalls;
 	bool m_disableMemoryTrace;
 };
 
@@ -200,13 +236,15 @@ public:
 		InterpreterState& _state,
 		Dialect const& _dialect,
 		Scope& _scope,
-		std::map<YulString, u256> const& _variables,
+		std::map<YulName, u256> const& _variables,
+		bool _disableExternalCalls,
 		bool _disableMemoryTrace
 	):
 		m_state(_state),
 		m_dialect(_dialect),
 		m_variables(_variables),
 		m_scope(_scope),
+		m_disableExternalCalls(_disableExternalCalls),
 		m_disableMemoryTrace(_disableMemoryTrace)
 	{}
 
@@ -219,7 +257,30 @@ public:
 	/// Returns the list of values of the expression.
 	std::vector<u256> values() const { return m_values; }
 
-private:
+protected:
+	void runExternalCall(evmasm::Instruction _instruction);
+	virtual std::unique_ptr<Interpreter> makeInterpreterCopy(std::map<YulName, u256> _variables = {}) const
+	{
+		return std::make_unique<Interpreter>(
+			m_state,
+			m_dialect,
+			m_scope,
+			m_disableExternalCalls,
+			m_disableMemoryTrace,
+			std::move(_variables)
+		);
+	}
+	virtual std::unique_ptr<Interpreter> makeInterpreterNew(InterpreterState& _state, Scope& _scope) const
+	{
+		return std::make_unique<Interpreter>(
+			_state,
+			m_dialect,
+			_scope,
+			m_disableExternalCalls,
+			m_disableMemoryTrace
+		);
+	}
+
 	void setValue(u256 _value);
 
 	/// Evaluates the given expression from right to left and
@@ -237,12 +298,13 @@ private:
 	InterpreterState& m_state;
 	Dialect const& m_dialect;
 	/// Values of variables.
-	std::map<YulString, u256> const& m_variables;
+	std::map<YulName, u256> const& m_variables;
 	Scope& m_scope;
 	/// Current value of the expression
 	std::vector<u256> m_values;
 	/// Current expression nesting level
 	unsigned m_nestingLevel = 0;
+	bool m_disableExternalCalls;
 	/// Flag to disable memory tracing
 	bool m_disableMemoryTrace;
 };

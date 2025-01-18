@@ -20,19 +20,20 @@
 
 #include <test/libsolidity/util/SoltestErrors.h>
 
-#include <libsolutil/AnsiColorized.h>
+#include <test/Common.h>
+#include <test/libyul/Common.h>
 
 #include <libyul/YulStack.h>
 
-#include <libevmasm/Instruction.h>
+#include <libevmasm/Assembly.h>
 #include <libevmasm/Disassemble.h>
+#include <libevmasm/Instruction.h>
 
 #include <liblangutil/DebugInfoSelection.h>
-#include <liblangutil/SourceReferenceFormatter.h>
 
 #include <boost/algorithm/string.hpp>
 
-#include <fstream>
+#include <ostream>
 
 using namespace solidity;
 using namespace solidity::util;
@@ -41,10 +42,9 @@ using namespace solidity::yul;
 using namespace solidity::yul::test;
 using namespace solidity::frontend;
 using namespace solidity::frontend::test;
-using namespace std;
 
-ObjectCompilerTest::ObjectCompilerTest(string const& _filename):
-	TestCase(_filename)
+ObjectCompilerTest::ObjectCompilerTest(std::string const& _filename):
+	solidity::frontend::test::EVMVersionRestrictedTestCase(_filename)
 {
 	m_source = m_reader.source();
 	m_optimisationPreset = m_reader.enumSetting<OptimisationPreset>(
@@ -57,54 +57,39 @@ ObjectCompilerTest::ObjectCompilerTest(string const& _filename):
 		},
 		"minimal"
 	);
-	m_wasm = m_reader.boolSetting("wasm", false);
 	m_expectation = m_reader.simpleExpectations();
 }
 
-TestCase::TestResult ObjectCompilerTest::run(ostream& _stream, string const& _linePrefix, bool const _formatted)
+TestCase::TestResult ObjectCompilerTest::run(std::ostream& _stream, std::string const& _linePrefix, bool const _formatted)
 {
-	YulStack stack(
-		EVMVersion(),
-		m_wasm ? YulStack::Language::Ewasm : YulStack::Language::StrictAssembly,
-		OptimiserSettings::preset(m_optimisationPreset),
-		DebugInfoSelection::All()
-	);
-	if (!stack.parseAndAnalyze("source", m_source))
+	YulStack yulStack = parseYul(m_source, "source", OptimiserSettings::preset(m_optimisationPreset));
+	MachineAssemblyObject obj;
+	if (!yulStack.hasErrors())
 	{
-		AnsiColorized(_stream, _formatted, {formatting::BOLD, formatting::RED}) << _linePrefix << "Error parsing source." << endl;
-		SourceReferenceFormatter{_stream, stack, true, false}
-			.printErrorInformation(stack.errors());
+		yulStack.optimize();
+		obj = yulStack.assemble(YulStack::Machine::EVM);
+	}
+	if (yulStack.hasErrors())
+	{
+		printYulErrors(yulStack, _stream, _linePrefix, _formatted);
 		return TestResult::FatalError;
 	}
-	stack.optimize();
 
-	if (m_wasm)
-	{
-		MachineAssemblyObject obj = stack.assemble(YulStack::Machine::Ewasm);
-		solAssert(obj.bytecode, "");
+	solAssert(obj.bytecode);
+	solAssert(obj.sourceMappings);
 
-		m_obtainedResult = "Text:\n" + obj.assembly + "\n";
-		m_obtainedResult += "Binary:\n" + util::toHex(obj.bytecode->bytecode) + "\n";
-	}
+	m_obtainedResult = "Assembly:\n" + obj.assembly->assemblyString(yulStack.debugInfoSelection());
+	if (obj.bytecode->bytecode.empty())
+		m_obtainedResult += "-- empty bytecode --\n";
 	else
-	{
-		MachineAssemblyObject obj = stack.assemble(YulStack::Machine::EVM);
-		solAssert(obj.bytecode, "");
-		solAssert(obj.sourceMappings, "");
-
-		m_obtainedResult = "Assembly:\n" + obj.assembly;
-		if (obj.bytecode->bytecode.empty())
-			m_obtainedResult += "-- empty bytecode --\n";
-		else
-			m_obtainedResult +=
-				"Bytecode: " +
-				util::toHex(obj.bytecode->bytecode) +
-				"\nOpcodes: " +
-				boost::trim_copy(evmasm::disassemble(obj.bytecode->bytecode)) +
-				"\nSourceMappings:" +
-				(obj.sourceMappings->empty() ? "" : " " + *obj.sourceMappings) +
-				"\n";
-	}
+		m_obtainedResult +=
+			"Bytecode: " +
+			util::toHex(obj.bytecode->bytecode) +
+			"\nOpcodes: " +
+			boost::trim_copy(evmasm::disassemble(obj.bytecode->bytecode, solidity::test::CommonOptions::get().evmVersion())) +
+			"\nSourceMappings:" +
+			(obj.sourceMappings->empty() ? "" : " " + *obj.sourceMappings) +
+			"\n";
 
 	return checkResult(_stream, _linePrefix, _formatted);
 }

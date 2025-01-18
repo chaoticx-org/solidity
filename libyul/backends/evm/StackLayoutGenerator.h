@@ -52,21 +52,21 @@ public:
 		/// Number of slots that need to be saved.
 		size_t deficit = 0;
 		/// Set of variables, eliminating which would decrease the stack deficit.
-		std::vector<YulString> variableChoices;
+		std::vector<YulName> variableChoices;
 	};
 
-	static StackLayout run(CFG const& _cfg);
+	static StackLayout run(CFG const& _cfg, bool _simulateFunctionsWithJumps);
 	/// @returns a map from function names to the stack too deep errors occurring in that function.
 	/// Requires @a _cfg to be a control flow graph generated from disambiguated Yul.
 	/// The empty string is mapped to the stack too deep errors of the main entry point.
-	static std::map<YulString, std::vector<StackTooDeep>> reportStackTooDeep(CFG const& _cfg);
+	static std::map<YulName, std::vector<StackTooDeep>> reportStackTooDeep(CFG const& _cfg, bool _simulateFunctionsWithJumps);
 	/// @returns all stack too deep errors in the function named @a _functionName.
 	/// Requires @a _cfg to be a control flow graph generated from disambiguated Yul.
 	/// If @a _functionName is empty, the stack too deep errors of the main entry point are reported instead.
-	static std::vector<StackTooDeep> reportStackTooDeep(CFG const& _cfg, YulString _functionName);
+	static std::vector<StackTooDeep> reportStackTooDeep(CFG const& _cfg, YulName _functionName, bool _simulateFunctionsWithJumps);
 
 private:
-	StackLayoutGenerator(StackLayout& _context);
+	StackLayoutGenerator(StackLayout& _context, CFG::FunctionInfo const* _functionInfo, bool _simulateFunctionsWithJumps);
 
 	/// @returns the optimal entry stack layout, s.t. @a _operation can be applied to it and
 	/// the result can be transformed to @a _exitStack with minimal stack shuffling.
@@ -79,7 +79,7 @@ private:
 
 	/// Main algorithm walking the graph from entry to exit and propagating back the stack layouts to the entries.
 	/// Iteratively reruns itself along backwards jumps until the layout is stabilized.
-	void processEntryPoint(CFG::BasicBlock const& _entry);
+	void processEntryPoint(CFG::BasicBlock const& _entry, CFG::FunctionInfo const* _functionInfo = nullptr);
 
 	/// @returns the best known exit layout of @a _block, if all dependencies are already @a _visited.
 	/// If not, adds the dependencies to @a _dependencyList and @returns std::nullopt.
@@ -112,9 +112,12 @@ private:
 	static Stack compressStack(Stack _stack);
 
 	//// Fills in junk when entering branches that do not need a clean stack in case the result is cheaper.
-	void fillInJunk(CFG::BasicBlock const& _block);
+	void fillInJunk(CFG::BasicBlock const& _block, CFG::FunctionInfo const* _functionInfo = nullptr);
 
 	StackLayout& m_layout;
+	CFG::FunctionInfo const* m_currentFunctionInfo = nullptr;
+	/// True if it simulates functions with jumps. False otherwise. True for legacy bytecode
+	bool m_simulateFunctionsWithJumps = true;
 };
 
 }

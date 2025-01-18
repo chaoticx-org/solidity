@@ -22,7 +22,7 @@
 set -e
 
 source scripts/common.sh
-source test/externalTests/common.sh
+source scripts/externalTests/common.sh
 
 REPO_ROOT=$(realpath "$(dirname "$0")/../..")
 
@@ -31,24 +31,23 @@ BINARY_TYPE="$1"
 BINARY_PATH="$(realpath "$2")"
 SELECTED_PRESETS="$3"
 
-function compile_fn { npm run build; }
-function test_fn { npm test; }
+function compile_fn { yarn run build; }
+function test_fn { yarn test; }
 
 function gp2_test
 {
-    local repo="https://github.com/gnosis/gp-v2-contracts.git"
-    local ref_type=branch
-    local ref=main
+    local repo="https://github.com/cowprotocol/contracts.git"
+    local ref="<latest-release>"
     local config_file="hardhat.config.ts"
     local config_var="config"
 
     local compile_only_presets=(
-        legacy-no-optimize        # Tests doing `new GPv2VaultRelayer` fail with "Error: Transaction reverted: trying to deploy a contract whose code is too large"
+        ir-no-optimize            # Tests fail with "Error: Transaction reverted: trying to deploy a contract whose code is too large"
+        legacy-no-optimize        # Tests fail with "Error: Transaction reverted: trying to deploy a contract whose code is too large"
     )
     local settings_presets=(
         "${compile_only_presets[@]}"
-        #ir-no-optimize           # Compilation fails with "YulException: Variable var_amount_1468 is 10 slot(s) too deep inside the stack."
-        #ir-no-optimize           # Compilation fails with "YulException: Variable var_offset_3451 is 1 slot(s) too deep inside the stack."
+        ir-optimize-evm-only
         ir-optimize-evm+yul
         legacy-optimize-evm-only
         legacy-optimize-evm+yul
@@ -58,16 +57,27 @@ function gp2_test
     print_presets_or_exit "$SELECTED_PRESETS"
 
     setup_solc "$DIR" "$BINARY_TYPE" "$BINARY_PATH"
-    download_project "$repo" "$ref_type" "$ref" "$DIR"
+    download_project "$repo" "$ref" "$DIR"
     [[ $BINARY_TYPE == native ]] && replace_global_solc "$BINARY_PATH"
 
-    neutralize_package_lock
     neutralize_package_json_hooks
     name_hardhat_default_export "$config_file" "$config_var"
     force_hardhat_compiler_binary "$config_file" "$BINARY_TYPE" "$BINARY_PATH"
     force_hardhat_compiler_settings "$config_file" "$(first_word "$SELECTED_PRESETS")" "$config_var"
     force_hardhat_unlimited_contract_size "$config_file" "$config_var"
-    npm install
+    yarn
+    # We require to install hardhat 2.20.0 due to support for evm version cancun, otherwise we get the following error:
+    # Invalid value {"blockGasLimit":12500000,"hardfork":"cancun","allowUnlimitedContractSize":true} for HardhatConfig.networks.hardhat - Expected a value of type HardhatNetworkConfig.
+    # See: https://github.com/NomicFoundation/hardhat/issues/4176
+    yarn add hardhat@2.20.0
+
+    # Ignore bench directory which fails to compile with current hardhat and ethers versions.
+    # bench/trace/gas.ts:123:19 - error TS2339: Property 'equals' does not exist on type 'Uint8Array'.
+    jq '. + {"exclude": ["bench"]}' tsconfig.json > temp.json
+    mv temp.json tsconfig.json
+
+    # Remove the config section that requires an Etherscan key. We don't need it just to run tests.
+    sed -i '/^  etherscan: {$/,/^  },$/d' hardhat.config.ts
 
     # Some dependencies come with pre-built artifacts. We want to build from scratch.
     rm -r node_modules/@gnosis.pm/safe-contracts/build/
@@ -92,11 +102,10 @@ function gp2_test
 
     # Disable tests that won't pass on the ir presets due to Hardhat heuristics. Note that this also disables
     # them for other presets but that's fine - we want same code run for benchmarks to be comparable.
-    # TODO: Remove this when Hardhat adjusts heuristics for IR (https://github.com/nomiclabs/hardhat/issues/2115).
+    # TODO: Remove this when Hardhat adjusts heuristics for IR (https://github.com/nomiclabs/hardhat/issues/3365).
     sed -i 's|it\(("should revert when encoding invalid flags"\)|it.skip\1|g' test/GPv2Trade.test.ts
 
     replace_version_pragmas
-
     for preset in $SELECTED_PRESETS; do
         hardhat_run_test "$config_file" "$preset" "${compile_only_presets[*]}" compile_fn test_fn "$config_var"
         store_benchmark_report hardhat gp2 "$repo" "$preset"

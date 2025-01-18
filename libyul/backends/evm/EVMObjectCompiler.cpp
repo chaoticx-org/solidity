@@ -33,16 +33,23 @@
 #include <boost/algorithm/string.hpp>
 
 using namespace solidity::yul;
-using namespace std;
 
-void EVMObjectCompiler::compile(Object& _object, AbstractAssembly& _assembly, EVMDialect const& _dialect, bool _optimize)
+void EVMObjectCompiler::compile(
+	Object const& _object,
+	AbstractAssembly& _assembly,
+	bool _optimize
+)
 {
-	EVMObjectCompiler compiler(_assembly, _dialect);
+	EVMObjectCompiler compiler(_assembly);
 	compiler.run(_object, _optimize);
 }
 
-void EVMObjectCompiler::run(Object& _object, bool _optimize)
+void EVMObjectCompiler::run(Object const& _object, bool _optimize)
 {
+	yulAssert(_object.dialect());
+	auto const* evmDialect = dynamic_cast<EVMDialect const*>(_object.dialect());
+	yulAssert(evmDialect);
+
 	BuiltinContext context;
 	context.currentObject = &_object;
 
@@ -50,42 +57,49 @@ void EVMObjectCompiler::run(Object& _object, bool _optimize)
 	for (auto const& subNode: _object.subObjects)
 		if (auto* subObject = dynamic_cast<Object*>(subNode.get()))
 		{
-			bool isCreation = !boost::ends_with(subObject->name.str(), "_deployed");
-			auto subAssemblyAndID = m_assembly.createSubAssembly(isCreation, subObject->name.str());
+			bool isCreation = !boost::ends_with(subObject->name, "_deployed");
+			auto subAssemblyAndID = m_assembly.createSubAssembly(isCreation, subObject->name);
 			context.subIDs[subObject->name] = subAssemblyAndID.second;
 			subObject->subId = subAssemblyAndID.second;
-			compile(*subObject, *subAssemblyAndID.first, m_dialect, _optimize);
+			compile(*subObject, *subAssemblyAndID.first, _optimize);
 		}
 		else
 		{
 			Data const& data = dynamic_cast<Data const&>(*subNode);
 			// Special handling of metadata.
-			if (data.name.str() == Object::metadataName())
+			if (data.name == Object::metadataName())
 				m_assembly.appendToAuxiliaryData(data.data);
 			else
 				context.subIDs[data.name] = m_assembly.appendData(data.data);
 		}
 
 	yulAssert(_object.analysisInfo, "No analysis info.");
-	yulAssert(_object.code, "No code.");
-	if (_optimize && m_dialect.evmVersion().canOverchargeGasForCall())
+	yulAssert(_object.hasCode(), "No code.");
+	if (evmDialect->eofVersion().has_value())
+		yulAssert(
+			_optimize && (evmDialect->evmVersion() >= langutil::EVMVersion::prague()),
+			"Experimental EOF support is only available for optimized via-IR compilation and the most recent EVM version."
+		);
+	if (_optimize && evmDialect->evmVersion().canOverchargeGasForCall())
 	{
 		auto stackErrors = OptimizedEVMCodeTransform::run(
 			m_assembly,
 			*_object.analysisInfo,
-			*_object.code,
-			m_dialect,
+			_object.code()->root(),
+			*evmDialect,
 			context,
 			OptimizedEVMCodeTransform::UseNamedLabels::ForFirstFunctionOfEachName
 		);
 		if (!stackErrors.empty())
 		{
-			vector<FunctionCall*> memoryGuardCalls = FunctionCallFinder::run(
-				*_object.code,
-				"memoryguard"_yulstring
+			yulAssert(_object.dialect());
+			std::vector<FunctionCall const*> memoryGuardCalls = findFunctionCalls(
+				_object.code()->root(),
+				"memoryguard",
+				*_object.dialect()
 			);
 			auto stackError = stackErrors.front();
-			string msg = stackError.comment() ? *stackError.comment() : "";
+			std::string msg = stackError.comment() ? *stackError.comment() : "";
 			if (memoryGuardCalls.empty())
 				msg += "\nNo memoryguard was present. "
 					"Consider using memory-safe assembly only and annotating it via "
@@ -103,14 +117,14 @@ void EVMObjectCompiler::run(Object& _object, bool _optimize)
 		CodeTransform transform{
 			m_assembly,
 			*_object.analysisInfo,
-			*_object.code,
-			m_dialect,
+			_object.code()->root(),
+			*evmDialect,
 			context,
 			_optimize,
 			{},
 			CodeTransform::UseNamedLabels::ForFirstFunctionOfEachName
 		};
-		transform(*_object.code);
+		transform(_object.code()->root());
 		if (!transform.stackErrors().empty())
 			BOOST_THROW_EXCEPTION(transform.stackErrors().front());
 	}

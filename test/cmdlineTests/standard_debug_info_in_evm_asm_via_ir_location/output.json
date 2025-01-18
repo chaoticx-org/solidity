@@ -1,4 +1,9 @@
-{"contracts":{"C":{"C":{"evm":{"assembly":"    /* \"C\":79:428  contract C... */
+{
+    "contracts": {
+        "C": {
+            "C": {
+                "evm": {
+                    "assembly": "    /* \"C\":79:503  contract C... */
   0xa0
   jumpi(tag_5, callvalue)
   0x1f
@@ -40,10 +45,10 @@
   tag_5
   jumpi
   mload
-    /* \"C\":147:149  42 */
+    /* \"C\":153:155  42 */
   mstore(0x80, 0x2a)
   0x00
-    /* \"C\":79:428  contract C... */
+    /* \"C\":79:503  contract C... */
   sstore
   mload(0x40)
   dataSize(sub_0)
@@ -52,9 +57,9 @@
   dataOffset(sub_0)
   dup3
   codecopy
-    /* \"C\":147:149  42 */
+    /* \"C\":153:155  42 */
   0x80
-    /* \"C\":79:428  contract C... */
+    /* \"C\":79:503  contract C... */
   mload
   dup2
   assignImmutable(\"0xe4b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10\")
@@ -70,30 +75,19 @@ tag_3:
 stop
 
 sub_0: assembly {
-        /* \"C\":79:428  contract C... */
-      0x80
-      0x40
-      dup2
-      dup2
-      mstore
+        /* \"C\":79:503  contract C... */
+      mstore(0x40, 0x80)
       jumpi(tag_2, iszero(lt(calldatasize, 0x04)))
       0x00
       dup1
       revert
     tag_2:
-      0x00
-      swap2
-      dup3
-      calldataload
-      0xe0
-      shr
-      swap1
-      dup2
+      shr(0xe0, calldataload(0x00))
+      dup1
       0x26121ff0
       eq
       tag_4
       jumpi
-      pop
       dup1
       0x793816ec
       eq
@@ -107,14 +101,9 @@ sub_0: assembly {
       dup1
       revert
     tag_8:
-      jumpi(tag_12, callvalue)
-      dup2
-      add(calldatasize, not(0x03))
-      slt
-      tag_12
-      jumpi
-      dup2
-      sload
+      jumpi(tag_26, callvalue)
+      jumpi(tag_26, slt(add(not(0x03), calldatasize), 0x00))
+      sload(0x00)
       sub(shl(0xff, 0x01), 0x01)
       dup2
       eq
@@ -122,25 +111,26 @@ sub_0: assembly {
       jumpi
       0x01
       add
-      swap2
-      dup3
+      0x00
       dup2
+      swap1
       sstore
-      dup2
-      mload
+      mload(0x40)
       shl(0xe4, 0x026121ff)
-        /* \"C\":403:411  this.f() */
+        /* \"C\":475:483  this.f() */
       dup2
       mstore
+        /* \"C\":79:503  contract C... */
+      swap1
+        /* \"C\":475:483  this.f() */
       0x20
-        /* \"C\":403:407  this */
-      dup2
-        /* \"C\":79:428  contract C... */
+        /* \"C\":79:503  contract C... */
+      dup3
       0x04
-        /* \"C\":403:407  this */
       dup2
+        /* \"C\":475:479  this */
       address
-        /* \"C\":403:411  this.f() */
+        /* \"C\":475:483  this.f() */
       gas
       staticcall
       swap2
@@ -148,52 +138,46 @@ sub_0: assembly {
       iszero
       tag_16
       jumpi
-      dup1
+        /* \"C\":79:503  contract C... */
+      0x00
+        /* \"C\":475:483  this.f() */
       swap3
       tag_18
       jumpi
-        /* \"C\":79:428  contract C... */
+        /* \"C\":79:503  contract C... */
     tag_19:
-        /* \"C\":403:411  this.f() */
+        /* \"C\":475:483  this.f() */
       0x20
-        /* \"C\":392:411  stateVar + this.f() */
-      dup5
-        /* \"C\":392:422  stateVar + this.f() + immutVar */
+        /* \"C\":464:494  stateVar + this.f() + immutVar */
       tag_20
-        /* \"C\":392:411  stateVar + this.f() */
+        /* \"C\":464:483  stateVar + this.f() */
       tag_21
-      dup7
-      dup10
+      dup6
+      dup6
       tag_1
       jump\t// in
     tag_21:
-        /* \"C\":414:422  immutVar */
+        /* \"C\":486:494  immutVar */
       immutable(\"0xe4b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10\")
-        /* \"C\":392:422  stateVar + this.f() + immutVar */
+        /* \"C\":464:494  stateVar + this.f() + immutVar */
       swap1
       tag_1
       jump\t// in
     tag_20:
-        /* \"C\":79:428  contract C... */
-      swap1
-      mload
+        /* \"C\":79:503  contract C... */
+      mload(0x40)
       swap1
       dup2
       mstore
       return
-        /* \"C\":403:411  this.f() */
+        /* \"C\":475:483  this.f() */
     tag_18:
-      swap1
       swap2
       pop
       0x20
-      returndatasize
-      dup2
-      gt
-      tag_22
-      jumpi
+      jumpi(tag_22, gt(0x20, returndatasize))
     tag_23:
-        /* \"C\":79:428  contract C... */
+        /* \"C\":79:503  contract C... */
       0x1f
       dup2
       add
@@ -210,107 +194,91 @@ sub_0: assembly {
       or
       tag_24
       jumpi
-        /* \"C\":403:411  this.f() */
+        /* \"C\":475:483  this.f() */
       0x20
-        /* \"C\":79:428  contract C... */
+        /* \"C\":79:503  contract C... */
       swap2
       dup5
       swap2
-      dup7
+      0x40
       mstore
-        /* \"C\":403:411  this.f() */
+        /* \"C\":475:483  this.f() */
       dup2
       add
-        /* \"C\":79:428  contract C... */
+        /* \"C\":79:503  contract C... */
       sub
       slt
       tag_26
       jumpi
-      pop
+      swap1
       mload
-        /* \"C\":392:411  stateVar + this.f() */
+      swap1
+        /* \"C\":464:483  stateVar + this.f() */
       tag_21
-        /* \"C\":403:411  this.f() */
-      0x20
+        /* \"C\":475:483  this.f() */
       jump(tag_19)
-        /* \"C\":79:428  contract C... */
+        /* \"C\":79:503  contract C... */
     tag_26:
+      0x00
       dup1
       revert
     tag_24:
+        /* \"C\":120:122  41 */
       shl(0xe0, 0x4e487b71)
-      dup4
+        /* \"C\":79:503  contract C... */
+      0x00
       mstore
       mstore(0x04, 0x41)
-      0x24
-        /* \"C\":117:119  41 */
-      dup4
-        /* \"C\":79:428  contract C... */
-      revert
-        /* \"C\":403:411  this.f() */
+      revert(0x00, 0x24)
+        /* \"C\":475:483  this.f() */
     tag_22:
       pop
       returndatasize
       jump(tag_23)
     tag_16:
-        /* \"C\":79:428  contract C... */
-      dup4
-      mload
-      swap1
+        /* \"C\":79:503  contract C... */
+      mload(0x40)
       returndatasize
-      swap1
+      0x00
       dup3
       returndatacopy
       returndatasize
       swap1
       revert
     tag_14:
+        /* \"C\":120:122  41 */
       shl(0xe0, 0x4e487b71)
-        /* \"C\":117:119  41 */
-      dup4
+        /* \"C\":79:503  contract C... */
+      0x00
+        /* \"C\":120:122  41 */
       mstore
       0x11
-        /* \"C\":79:428  contract C... */
+        /* \"C\":79:503  contract C... */
       0x04
-        /* \"C\":117:119  41 */
+        /* \"C\":120:122  41 */
       mstore
       0x24
-      dup4
+        /* \"C\":79:503  contract C... */
+      0x00
+        /* \"C\":120:122  41 */
       revert
-        /* \"C\":79:428  contract C... */
-    tag_12:
-      pop
-      dup1
-      revert
+        /* \"C\":79:503  contract C... */
     tag_6:
-      pop
-      jumpi(tag_12, callvalue)
-      dup2
-      add(calldatasize, not(0x03))
-      slt
-      tag_12
-      jumpi
+      jumpi(tag_26, callvalue)
+      jumpi(tag_26, slt(add(not(0x03), calldatasize), 0x00))
       0x20
-      swap2
-      sload
-      swap1
-      mload
+      sload(0x00)
+      mload(0x40)
       swap1
       dup2
       mstore
       return
     tag_4:
-      dup4
-      swap1
-      jumpi(tag_12, callvalue)
-      dup2
-      add(calldatasize, not(0x03))
-      slt
-      tag_12
-      jumpi
-        /* \"C\":290:298  immutVar */
+      jumpi(tag_26, callvalue)
+      jumpi(tag_26, slt(add(not(0x03), calldatasize), 0x00))
+        /* \"C\":326:334  immutVar */
       immutable(\"0xe4b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10\")
-        /* \"C\":117:119  41 */
+        /* \"C\":120:122  41 */
       dup1
       0x29
       add
@@ -321,14 +289,15 @@ sub_0: assembly {
       and
       tag_14
       jumpi
-        /* \"C\":79:428  contract C... */
+        /* \"C\":79:503  contract C... */
       0x20
-      swap3
-      pop
+      swap1
+      mload(0x40)
+      swap1
       dup2
       mstore
       return
-        /* \"C\":117:119  41 */
+        /* \"C\":120:122  41 */
     tag_1:
       swap2
       swap1
@@ -351,17 +320,20 @@ sub_0: assembly {
       iszero
       and
       or
-      tag_38
+      tag_14
       jumpi
       jump\t// out
-    tag_38:
-      mstore(0x00, shl(0xe0, 0x4e487b71))
-      mstore(0x04, 0x11)
-      revert(0x00, 0x24)
 
     auxdata: <AUXDATA REMOVED>
 }
-"}}},"D":{"D":{"evm":{"assembly":"    /* \"D\":91:166  contract D is C(3)... */
+"
+                }
+            }
+        },
+        "D": {
+            "D": {
+                "evm": {
+                    "assembly": "    /* \"D\":91:181  contract D is C(3)... */
   0xa0
   jumpi(tag_5, callvalue)
   0x1f
@@ -403,13 +375,13 @@ sub_0: assembly {
   tag_5
   jumpi
   mload
-    /* \"C\":147:149  42 */
+    /* \"C\":153:155  42 */
   mstore(0x80, 0x2a)
-    /* \"D\":91:166  contract D is C(3)... */
+    /* \"D\":91:181  contract D is C(3)... */
   dup1
     /* \"D\":107:108  3 */
   0x03
-    /* \"D\":91:166  contract D is C(3)... */
+    /* \"D\":91:181  contract D is C(3)... */
   add
   swap1
   dup2
@@ -427,9 +399,9 @@ sub_0: assembly {
   dataOffset(sub_0)
   dup3
   codecopy
-    /* \"C\":147:149  42 */
+    /* \"C\":153:155  42 */
   0x80
-    /* \"D\":91:166  contract D is C(3)... */
+    /* \"D\":91:181  contract D is C(3)... */
   mload
   dup2
   assignImmutable(\"0xe4b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10\")
@@ -449,30 +421,19 @@ tag_3:
 stop
 
 sub_0: assembly {
-        /* \"D\":91:166  contract D is C(3)... */
-      0x80
-      0x40
-      dup2
-      dup2
-      mstore
+        /* \"D\":91:181  contract D is C(3)... */
+      mstore(0x40, 0x80)
       jumpi(tag_2, iszero(lt(calldatasize, 0x04)))
       0x00
       dup1
       revert
     tag_2:
-      0x00
-      swap2
-      dup3
-      calldataload
-      0xe0
-      shr
-      swap1
-      dup2
+      shr(0xe0, calldataload(0x00))
+      dup1
       0x26121ff0
       eq
       tag_4
       jumpi
-      pop
       dup1
       0x793816ec
       eq
@@ -486,14 +447,9 @@ sub_0: assembly {
       dup1
       revert
     tag_8:
-      jumpi(tag_12, callvalue)
-      dup2
-      add(calldatasize, not(0x03))
-      slt
-      tag_12
-      jumpi
-      dup2
-      sload
+      jumpi(tag_26, callvalue)
+      jumpi(tag_26, slt(add(not(0x03), calldatasize), 0x00))
+      sload(0x00)
       sub(shl(0xff, 0x01), 0x01)
       dup2
       eq
@@ -501,25 +457,26 @@ sub_0: assembly {
       jumpi
       0x01
       add
-      swap2
-      dup3
+      0x00
       dup2
+      swap1
       sstore
-      dup2
-      mload
+      mload(0x40)
       shl(0xe4, 0x026121ff)
-        /* \"C\":403:411  this.f() */
+        /* \"C\":475:483  this.f() */
       dup2
       mstore
+        /* \"D\":91:181  contract D is C(3)... */
+      swap1
+        /* \"C\":475:483  this.f() */
       0x20
-        /* \"C\":403:407  this */
-      dup2
-        /* \"D\":91:166  contract D is C(3)... */
+        /* \"D\":91:181  contract D is C(3)... */
+      dup3
       0x04
-        /* \"C\":403:407  this */
       dup2
+        /* \"C\":475:479  this */
       address
-        /* \"C\":403:411  this.f() */
+        /* \"C\":475:483  this.f() */
       gas
       staticcall
       swap2
@@ -527,52 +484,46 @@ sub_0: assembly {
       iszero
       tag_16
       jumpi
-      dup1
+        /* \"D\":91:181  contract D is C(3)... */
+      0x00
+        /* \"C\":475:483  this.f() */
       swap3
       tag_18
       jumpi
-        /* \"D\":91:166  contract D is C(3)... */
+        /* \"D\":91:181  contract D is C(3)... */
     tag_19:
-        /* \"C\":403:411  this.f() */
+        /* \"C\":475:483  this.f() */
       0x20
-        /* \"C\":392:411  stateVar + this.f() */
-      dup5
-        /* \"C\":392:422  stateVar + this.f() + immutVar */
+        /* \"C\":464:494  stateVar + this.f() + immutVar */
       tag_20
-        /* \"C\":392:411  stateVar + this.f() */
+        /* \"C\":464:483  stateVar + this.f() */
       tag_21
-      dup7
-      dup10
+      dup6
+      dup6
       tag_1
       jump\t// in
     tag_21:
-        /* \"C\":414:422  immutVar */
+        /* \"C\":486:494  immutVar */
       immutable(\"0xe4b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10\")
-        /* \"C\":392:422  stateVar + this.f() + immutVar */
+        /* \"C\":464:494  stateVar + this.f() + immutVar */
       swap1
       tag_1
       jump\t// in
     tag_20:
-        /* \"D\":91:166  contract D is C(3)... */
-      swap1
-      mload
+        /* \"D\":91:181  contract D is C(3)... */
+      mload(0x40)
       swap1
       dup2
       mstore
       return
-        /* \"C\":403:411  this.f() */
+        /* \"C\":475:483  this.f() */
     tag_18:
-      swap1
       swap2
       pop
       0x20
-      returndatasize
-      dup2
-      gt
-      tag_22
-      jumpi
+      jumpi(tag_22, gt(0x20, returndatasize))
     tag_23:
-        /* \"D\":91:166  contract D is C(3)... */
+        /* \"D\":91:181  contract D is C(3)... */
       0x1f
       dup2
       add
@@ -589,107 +540,91 @@ sub_0: assembly {
       or
       tag_24
       jumpi
-        /* \"C\":403:411  this.f() */
+        /* \"C\":475:483  this.f() */
       0x20
-        /* \"D\":91:166  contract D is C(3)... */
+        /* \"D\":91:181  contract D is C(3)... */
       swap2
       dup5
       swap2
-      dup7
+      0x40
       mstore
-        /* \"C\":403:411  this.f() */
+        /* \"C\":475:483  this.f() */
       dup2
       add
-        /* \"D\":91:166  contract D is C(3)... */
+        /* \"D\":91:181  contract D is C(3)... */
       sub
       slt
       tag_26
       jumpi
-      pop
+      swap1
       mload
-        /* \"C\":392:411  stateVar + this.f() */
+      swap1
+        /* \"C\":464:483  stateVar + this.f() */
       tag_21
-        /* \"C\":403:411  this.f() */
-      0x20
+        /* \"C\":475:483  this.f() */
       jump(tag_19)
-        /* \"D\":91:166  contract D is C(3)... */
+        /* \"D\":91:181  contract D is C(3)... */
     tag_26:
+      0x00
       dup1
       revert
     tag_24:
+        /* \"C\":120:122  41 */
       shl(0xe0, 0x4e487b71)
-      dup4
+        /* \"D\":91:181  contract D is C(3)... */
+      0x00
       mstore
       mstore(0x04, 0x41)
-      0x24
-        /* \"C\":117:119  41 */
-      dup4
-        /* \"D\":91:166  contract D is C(3)... */
-      revert
-        /* \"C\":403:411  this.f() */
+      revert(0x00, 0x24)
+        /* \"C\":475:483  this.f() */
     tag_22:
       pop
       returndatasize
       jump(tag_23)
     tag_16:
-        /* \"D\":91:166  contract D is C(3)... */
-      dup4
-      mload
-      swap1
+        /* \"D\":91:181  contract D is C(3)... */
+      mload(0x40)
       returndatasize
-      swap1
+      0x00
       dup3
       returndatacopy
       returndatasize
       swap1
       revert
     tag_14:
+        /* \"C\":120:122  41 */
       shl(0xe0, 0x4e487b71)
-        /* \"C\":117:119  41 */
-      dup4
+        /* \"D\":91:181  contract D is C(3)... */
+      0x00
+        /* \"C\":120:122  41 */
       mstore
       0x11
-        /* \"D\":91:166  contract D is C(3)... */
+        /* \"D\":91:181  contract D is C(3)... */
       0x04
-        /* \"C\":117:119  41 */
+        /* \"C\":120:122  41 */
       mstore
       0x24
-      dup4
+        /* \"D\":91:181  contract D is C(3)... */
+      0x00
+        /* \"C\":120:122  41 */
       revert
-        /* \"D\":91:166  contract D is C(3)... */
-    tag_12:
-      pop
-      dup1
-      revert
+        /* \"D\":91:181  contract D is C(3)... */
     tag_6:
-      pop
-      jumpi(tag_12, callvalue)
-      dup2
-      add(calldatasize, not(0x03))
-      slt
-      tag_12
-      jumpi
+      jumpi(tag_26, callvalue)
+      jumpi(tag_26, slt(add(not(0x03), calldatasize), 0x00))
       0x20
-      swap2
-      sload
-      swap1
-      mload
+      sload(0x00)
+      mload(0x40)
       swap1
       dup2
       mstore
       return
     tag_4:
-      dup4
-      swap1
-      jumpi(tag_12, callvalue)
-      dup2
-      add(calldatasize, not(0x03))
-      slt
-      tag_12
-      jumpi
-        /* \"C\":290:298  immutVar */
+      jumpi(tag_26, callvalue)
+      jumpi(tag_26, slt(add(not(0x03), calldatasize), 0x00))
+        /* \"C\":326:334  immutVar */
       immutable(\"0xe4b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10\")
-        /* \"C\":117:119  41 */
+        /* \"C\":120:122  41 */
       dup1
       0x29
       add
@@ -700,14 +635,15 @@ sub_0: assembly {
       and
       tag_14
       jumpi
-        /* \"D\":91:166  contract D is C(3)... */
+        /* \"D\":91:181  contract D is C(3)... */
       0x20
-      swap3
-      pop
+      swap1
+      mload(0x40)
+      swap1
       dup2
       mstore
       return
-        /* \"C\":117:119  41 */
+        /* \"C\":120:122  41 */
     tag_1:
       swap2
       swap1
@@ -730,14 +666,23 @@ sub_0: assembly {
       iszero
       and
       or
-      tag_38
+      tag_14
       jumpi
       jump\t// out
-    tag_38:
-      mstore(0x00, shl(0xe0, 0x4e487b71))
-      mstore(0x04, 0x11)
-      revert(0x00, 0x24)
 
     auxdata: <AUXDATA REMOVED>
 }
-"}}}},"sources":{"C":{"id":0},"D":{"id":1}}}
+"
+                }
+            }
+        }
+    },
+    "sources": {
+        "C": {
+            "id": 0
+        },
+        "D": {
+            "id": 1
+        }
+    }
+}

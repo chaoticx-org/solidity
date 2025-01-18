@@ -21,6 +21,7 @@
 #include <libyul/AST.h>
 #include <libyul/Dialect.h>
 #include <libyul/FunctionReferenceResolver.h>
+#include <libyul/Utilities.h>
 
 #include <libsolutil/Common.h>
 #include <libsolutil/CommonData.h>
@@ -30,7 +31,6 @@
 #include <range/v3/view/reverse.hpp>
 #include <range/v3/algorithm/find_if.hpp>
 
-using namespace std;
 using namespace solidity::yul;
 
 
@@ -51,9 +51,15 @@ void ControlFlowBuilder::operator()(If const& _if)
 {
 	visit(*_if.condition);
 	ControlFlowNode* node = m_currentNode;
-	(*this)(_if.body);
+
+	ControlFlowNode* ifEnd = newNode();
+	node->successors.emplace_back(ifEnd);
+
 	newConnectedNode();
-	node->successors.emplace_back(m_currentNode);
+	(*this)(_if.body);
+
+	m_currentNode->successors.emplace_back(ifEnd);
+	m_currentNode = ifEnd;
 }
 
 void ControlFlowBuilder::operator()(Switch const& _switch)
@@ -68,8 +74,8 @@ void ControlFlowBuilder::operator()(Switch const& _switch)
 	for (Case const& case_: _switch.cases)
 	{
 		m_currentNode = initialNode;
-		(*this)(case_.body);
 		newConnectedNode();
+		(*this)(case_.body);
 		m_currentNode->successors.emplace_back(finalNode);
 	}
 	m_currentNode = finalNode;
@@ -92,7 +98,7 @@ void ControlFlowBuilder::operator()(FunctionDefinition const& _function)
 
 	m_currentNode->successors.emplace_back(flow.exit);
 
-	m_functionFlows[&_function] = move(flow);
+	m_functionFlows[&_function] = std::move(flow);
 
 	m_leave = nullptr;
 }
@@ -156,7 +162,7 @@ void ControlFlowBuilder::newConnectedNode()
 
 ControlFlowNode* ControlFlowBuilder::newNode()
 {
-	m_nodes.emplace_back(make_shared<ControlFlowNode>());
+	m_nodes.emplace_back(std::make_shared<ControlFlowNode>());
 	return m_nodes.back().get();
 }
 
@@ -224,9 +230,9 @@ ControlFlowSideEffectsCollector::ControlFlowSideEffectsCollector(
 	}
 }
 
-map<YulString, ControlFlowSideEffects> ControlFlowSideEffectsCollector::functionSideEffectsNamed() const
+std::map<YulName, ControlFlowSideEffects> ControlFlowSideEffectsCollector::functionSideEffectsNamed() const
 {
-	map<YulString, ControlFlowSideEffects> result;
+	std::map<YulName, ControlFlowSideEffects> result;
 	for (auto&& [function, sideEffects]: m_functionSideEffects)
 		yulAssert(result.insert({function->name, sideEffects}).second);
 	return result;
@@ -266,7 +272,7 @@ ControlFlowNode const* ControlFlowSideEffectsCollector::nextProcessableNode(Func
 
 ControlFlowSideEffects const& ControlFlowSideEffectsCollector::sideEffects(FunctionCall const& _call) const
 {
-	if (auto const* builtin = m_dialect.builtin(_call.functionName.name))
+	if (BuiltinFunction const* builtin = resolveBuiltinFunction(_call.functionName, m_dialect))
 		return builtin->controlFlowSideEffects;
 	else
 		return m_functionSideEffects.at(m_functionReferences.at(&_call));
@@ -282,4 +288,3 @@ void ControlFlowSideEffectsCollector::recordReachabilityAndQueue(
 	if (m_processedNodes[&_function].insert(_node).second)
 		m_pendingNodes.at(&_function).push_front(_node);
 }
-

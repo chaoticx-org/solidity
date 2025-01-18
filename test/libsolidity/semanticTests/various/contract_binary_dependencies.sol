@@ -15,9 +15,6 @@ contract C {
         new B();
     }
 }
-
-// ====
-// compileToEwasm: also
 // ----
 // constructor() ->
-// gas irOptimized: 101063
+// gas irOptimized: 100415

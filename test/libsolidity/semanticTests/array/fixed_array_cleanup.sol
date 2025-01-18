@@ -7,14 +7,15 @@ contract c {
     }
     function clear() public { delete data; }
 }
-// ====
-// compileToEwasm: also
 // ----
 // storageEmpty -> 1
 // fill() ->
-// gas irOptimized: 465380
-// gas legacy: 471280
-// gas legacyOptimized: 467500
+// gas irOptimized: 465013
+// gas legacy: 468825
+// gas legacyOptimized: 466238
 // storageEmpty -> 0
 // clear() ->
+// gas irOptimized: 122148
+// gas legacy: 122440
+// gas legacyOptimized: 122259
 // storageEmpty -> 1

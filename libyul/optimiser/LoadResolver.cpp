@@ -26,6 +26,7 @@
 #include <libyul/backends/evm/EVMMetrics.h>
 #include <libyul/optimiser/Semantics.h>
 #include <libyul/optimiser/CallGraphGenerator.h>
+#include <libyul/optimiser/OptimizerUtilities.h>
 #include <libyul/SideEffects.h>
 #include <libyul/AST.h>
 #include <libyul/Utilities.h>
@@ -35,7 +36,6 @@
 
 #include <limits>
 
-using namespace std;
 using namespace solidity;
 using namespace solidity::util;
 using namespace solidity::evmasm;
@@ -56,30 +56,42 @@ void LoadResolver::visit(Expression& _e)
 {
 	DataFlowAnalyzer::visit(_e);
 
-	if (FunctionCall const* funCall = std::get_if<FunctionCall>(&_e))
+	if (
+		FunctionCall const* funCall = std::get_if<FunctionCall>(&_e);
+		funCall && std::holds_alternative<BuiltinName>(funCall->functionName)
+	)
 	{
-		for (auto location: { StoreLoadLocation::Memory, StoreLoadLocation::Storage })
-			if (funCall->functionName.name == m_loadFunctionName[static_cast<unsigned>(location)])
-			{
-				tryResolve(_e, location, funCall->arguments);
-				break;
-			}
-
-		if (!m_containsMSize && funCall->functionName.name == m_dialect.hashFunction({}))
+		auto const& builtinHandle = std::get<BuiltinName>(funCall->functionName).handle;
+		if (builtinHandle == m_loadFunctionName[static_cast<unsigned>(StoreLoadLocation::Memory)])
+			tryResolve(_e, StoreLoadLocation::Memory, funCall->arguments);
+		else if (builtinHandle == m_loadFunctionName[static_cast<unsigned>(StoreLoadLocation::Storage)])
+			tryResolve(_e, StoreLoadLocation::Storage, funCall->arguments);
+		else if (!m_containsMSize && builtinHandle == m_dialect.hashFunctionHandle())
+		{
+			Identifier const* start = std::get_if<Identifier>(&funCall->arguments.at(0));
+			Identifier const* length = std::get_if<Identifier>(&funCall->arguments.at(1));
+			if (start && length)
+				if (auto const& value = keccakValue(start->name, length->name))
+					if (inScope(*value))
+					{
+						_e = Identifier{debugDataOf(_e), *value};
+						return;
+					}
 			tryEvaluateKeccak(_e, funCall->arguments);
+		}
 	}
 }
 
 void LoadResolver::tryResolve(
 	Expression& _e,
 	StoreLoadLocation _location,
-	vector<Expression> const& _arguments
+	std::vector<Expression> const& _arguments
 )
 {
-	if (_arguments.empty() || !holds_alternative<Identifier>(_arguments.at(0)))
+	if (_arguments.empty() || !std::holds_alternative<Identifier>(_arguments.at(0)))
 		return;
 
-	YulString key = std::get<Identifier>(_arguments.at(0)).name;
+	YulName key = std::get<Identifier>(_arguments.at(0)).name;
 	if (_location == StoreLoadLocation::Storage)
 	{
 		if (auto value = storageValue(key))
@@ -117,8 +129,7 @@ void LoadResolver::tryEvaluateKeccak(
 			{},
 			LiteralKind::Number,
 			// a dummy 256-bit number to represent the Keccak256 hash.
-			YulString{numeric_limits<u256>::max().str()},
-			{}
+			LiteralValue{std::numeric_limits<u256>::max()}
 		}
 	);
 
@@ -129,20 +140,20 @@ void LoadResolver::tryEvaluateKeccak(
 	if (costOfLiteral > costOfKeccak)
 		return;
 
-	optional<YulString> value = memoryValue(memoryKey->name);
+	std::optional<YulName> value = memoryValue(memoryKey->name);
 	if (value && inScope(*value))
 	{
-		optional<u256> memoryContent = valueOfIdentifier(*value);
-		optional<u256> byteLength = valueOfIdentifier(length->name);
+		std::optional<u256> memoryContent = valueOfIdentifier(*value);
+		std::optional<u256> byteLength = valueOfIdentifier(length->name);
 		if (memoryContent && byteLength && *byteLength <= 32)
 		{
 			bytes contentAsBytes = toBigEndian(*memoryContent);
 			contentAsBytes.resize(static_cast<size_t>(*byteLength));
+			u256 const contentHash (keccak256(contentAsBytes));
 			_e = Literal{
 				debugDataOf(_e),
 				LiteralKind::Number,
-				YulString{u256(keccak256(contentAsBytes)).str()},
-				m_dialect.defaultType
+				LiteralValue{contentHash}
 			};
 		}
 	}

@@ -20,7 +20,6 @@
 
 #include <liblangutil/CharStream.h>
 #include <liblangutil/ErrorReporter.h>
-#include <liblangutil/SourceReferenceFormatter.h>
 
 #include <libyul/AsmAnalysis.h>
 #include <libyul/AsmAnalysisInfo.h>
@@ -29,7 +28,7 @@
 #include <libyul/AsmPrinter.h>
 #include <libyul/AST.h>
 #include <libyul/ObjectParser.h>
-#include <libyul/YulString.h>
+#include <libyul/YulName.h>
 #include <libyul/backends/evm/EVMDialect.h>
 #include <libyul/optimiser/Disambiguator.h>
 #include <libyul/optimiser/ForLoopInitRewriter.h>
@@ -46,7 +45,6 @@
 #include <cassert>
 #include <memory>
 
-using namespace std;
 using namespace solidity;
 using namespace solidity::langutil;
 using namespace solidity::yul;
@@ -56,39 +54,40 @@ using namespace solidity::phaser;
 namespace solidity::phaser
 {
 
-ostream& operator<<(ostream& _stream, Program const& _program);
+std::ostream& operator<<(std::ostream& _stream, Program const& _program);
 
 }
 
 Program::Program(Program const& program):
-	m_ast(make_unique<Block>(get<Block>(ASTCopier{}(*program.m_ast)))),
+	m_ast(std::make_unique<AST>(program.m_dialect, std::get<Block>(ASTCopier{}(program.m_ast->root())))),
 	m_dialect{program.m_dialect},
 	m_nameDispenser(program.m_nameDispenser)
 {
 }
 
-variant<Program, ErrorList> Program::load(CharStream& _sourceCode)
+std::variant<Program, ErrorList> Program::load(CharStream& _sourceCode)
 {
 	// ASSUMPTION: parseSource() rewinds the stream on its own
-	Dialect const& dialect = EVMDialect::strictAssemblyForEVMObjects(EVMVersion{});
+	// TODO: Add support for EOF
+	Dialect const& dialect = EVMDialect::strictAssemblyForEVMObjects(EVMVersion{}, std::nullopt);
 
-	variant<unique_ptr<Block>, ErrorList> astOrErrors = parseObject(dialect, _sourceCode);
-	if (holds_alternative<ErrorList>(astOrErrors))
-		return get<ErrorList>(astOrErrors);
+	std::variant<std::unique_ptr<AST>, ErrorList> astOrErrors = parseObject(dialect, _sourceCode);
+	if (std::holds_alternative<ErrorList>(astOrErrors))
+		return std::get<ErrorList>(astOrErrors);
 
-	variant<unique_ptr<AsmAnalysisInfo>, ErrorList> analysisInfoOrErrors = analyzeAST(
+	std::variant<std::unique_ptr<AsmAnalysisInfo>, ErrorList> analysisInfoOrErrors = analyzeAST(
 		dialect,
-		*get<unique_ptr<Block>>(astOrErrors)
+		*std::get<std::unique_ptr<AST>>(astOrErrors)
 	);
-	if (holds_alternative<ErrorList>(analysisInfoOrErrors))
-		return get<ErrorList>(analysisInfoOrErrors);
+	if (std::holds_alternative<ErrorList>(analysisInfoOrErrors))
+		return std::get<ErrorList>(analysisInfoOrErrors);
 
 	Program program(
 		dialect,
 		disambiguateAST(
 			dialect,
-			*get<unique_ptr<Block>>(astOrErrors),
-			*get<unique_ptr<AsmAnalysisInfo>>(analysisInfoOrErrors)
+			*std::get<std::unique_ptr<AST>>(astOrErrors),
+			*std::get<std::unique_ptr<AsmAnalysisInfo>>(analysisInfoOrErrors)
 		)
 	);
 	program.optimise({
@@ -100,31 +99,31 @@ variant<Program, ErrorList> Program::load(CharStream& _sourceCode)
 	return program;
 }
 
-void Program::optimise(vector<string> const& _optimisationSteps)
+void Program::optimise(std::vector<std::string> const& _optimisationSteps)
 {
-	m_ast = applyOptimisationSteps(m_dialect, m_nameDispenser, move(m_ast), _optimisationSteps);
+	m_ast = applyOptimisationSteps(m_dialect, m_nameDispenser, std::move(m_ast), _optimisationSteps);
 }
 
-ostream& phaser::operator<<(ostream& _stream, Program const& _program)
+std::ostream& phaser::operator<<(std::ostream& _stream, Program const& _program)
 {
-	return _stream << AsmPrinter()(*_program.m_ast);
+	return _stream << AsmPrinter::format(*_program.m_ast);
 }
 
-string Program::toJson() const
+std::string Program::toJson() const
 {
-	Json::Value serializedAst = AsmJsonConverter(0)(*m_ast);
+	Json serializedAst = AsmJsonConverter(m_dialect, 0)(m_ast->root());
 	return jsonPrettyPrint(removeNullMembers(std::move(serializedAst)));
 }
 
-variant<unique_ptr<Block>, ErrorList> Program::parseObject(Dialect const& _dialect, CharStream _source)
+std::variant<std::unique_ptr<AST>, ErrorList> Program::parseObject(Dialect const& _dialect, CharStream _source)
 {
 	ErrorList errors;
 	ErrorReporter errorReporter(errors);
-	auto scanner = make_shared<Scanner>(_source);
+	auto scanner = std::make_shared<Scanner>(_source);
 
 	ObjectParser parser(errorReporter, _dialect);
-	shared_ptr<Object> object = parser.parse(scanner, false);
-	if (object == nullptr || !errorReporter.errors().empty())
+	std::shared_ptr<Object> object = parser.parse(scanner, false);
+	if (object == nullptr || errorReporter.hasErrors())
 		// NOTE: It's possible to get errors even if the returned object is non-null.
 		// For example when there are errors in a nested object.
 		return errors;
@@ -137,7 +136,7 @@ variant<unique_ptr<Block>, ErrorList> Program::parseObject(Dialect const& _diale
 			// The other object references the nested one which makes analysis fail. Below we try to
 			// extract just the nested one for that reason. This is just a heuristic. If there's no
 			// subobject with such a suffix we fall back to accepting the whole object as is.
-			if (subObject != nullptr && subObject->name.str() == object->name.str() + "_deployed")
+			if (subObject != nullptr && subObject->name == object->name + "_deployed")
 			{
 				deployedObject = dynamic_cast<Object*>(subObject.get());
 				if (deployedObject != nullptr)
@@ -151,48 +150,48 @@ variant<unique_ptr<Block>, ErrorList> Program::parseObject(Dialect const& _diale
 	// The public API of the class does not provide access to the smart pointer so it won't be hard
 	// to switch to shared_ptr if the copying turns out to be an issue (though it would be better
 	// to refactor ObjectParser and Object to use unique_ptr instead).
-	auto astCopy = make_unique<Block>(get<Block>(ASTCopier{}(*selectedObject->code)));
+	auto astCopy = std::make_unique<AST>(_dialect, std::get<Block>(ASTCopier{}(selectedObject->code()->root())));
 
-	return variant<unique_ptr<Block>, ErrorList>(move(astCopy));
+	return std::variant<std::unique_ptr<AST>, ErrorList>(std::move(astCopy));
 }
 
-variant<unique_ptr<AsmAnalysisInfo>, ErrorList> Program::analyzeAST(Dialect const& _dialect, Block const& _ast)
+std::variant<std::unique_ptr<AsmAnalysisInfo>, ErrorList> Program::analyzeAST(Dialect const& _dialect, AST const& _ast)
 {
 	ErrorList errors;
 	ErrorReporter errorReporter(errors);
-	auto analysisInfo = make_unique<AsmAnalysisInfo>();
+	auto analysisInfo = std::make_unique<AsmAnalysisInfo>();
 	AsmAnalyzer analyzer(*analysisInfo, errorReporter, _dialect);
 
-	bool analysisSuccessful = analyzer.analyze(_ast);
+	bool analysisSuccessful = analyzer.analyze(_ast.root());
 	if (!analysisSuccessful)
 		return errors;
 
-	assert(errorReporter.errors().empty());
-	return variant<unique_ptr<AsmAnalysisInfo>, ErrorList>(move(analysisInfo));
+	assert(!errorReporter.hasErrors());
+	return std::variant<std::unique_ptr<AsmAnalysisInfo>, ErrorList>(std::move(analysisInfo));
 }
 
-unique_ptr<Block> Program::disambiguateAST(
+std::unique_ptr<AST> Program::disambiguateAST(
 	Dialect const& _dialect,
-	Block const& _ast,
+	AST const& _ast,
 	AsmAnalysisInfo const& _analysisInfo
 )
 {
-	set<YulString> const externallyUsedIdentifiers = {};
+	std::set<YulName> const externallyUsedIdentifiers = {};
 	Disambiguator disambiguator(_dialect, _analysisInfo, externallyUsedIdentifiers);
 
-	return make_unique<Block>(get<Block>(disambiguator(_ast)));
+	return std::make_unique<AST>(_dialect, std::get<Block>(disambiguator(_ast.root())));
 }
 
-unique_ptr<Block> Program::applyOptimisationSteps(
+std::unique_ptr<AST> Program::applyOptimisationSteps(
 	Dialect const& _dialect,
 	NameDispenser& _nameDispenser,
-	unique_ptr<Block> _ast,
-	vector<string> const& _optimisationSteps
+	std::unique_ptr<AST> _ast,
+	std::vector<std::string> const& _optimisationSteps
 )
 {
 	// An empty set of reserved identifiers. It could be a constructor parameter but I don't
 	// think it would be useful in this tool. Other tools (like yulopti) have it empty too.
-	set<YulString> const externallyUsedIdentifiers = {};
+	std::set<YulName> const externallyUsedIdentifiers = {};
 	OptimiserStepContext context{
 		_dialect,
 		_nameDispenser,
@@ -200,10 +199,11 @@ unique_ptr<Block> Program::applyOptimisationSteps(
 		frontend::OptimiserSettings::standard().expectedExecutionsPerDeployment
 	};
 
-	for (string const& step: _optimisationSteps)
-		OptimiserSuite::allSteps().at(step)->run(context, *_ast);
+	auto astRoot = std::get<Block>(ASTCopier{}(_ast->root()));
+	for (std::string const& step: _optimisationSteps)
+		OptimiserSuite::allSteps().at(step)->run(context, astRoot);
 
-	return _ast;
+	return std::make_unique<AST>(_dialect, std::move(astRoot));
 }
 
 size_t Program::computeCodeSize(Block const& _ast, CodeWeights const& _weights)
